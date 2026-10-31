@@ -1,0 +1,14 @@
+SSR COMP soft-start clamp must release after completion
+.include GenericFlybackPWM.lib
+Vcc vcc 0 10
+Ven en 0 1
+Vfb fb 0 0
+Vcs cs 0 0
+Xctrl fb cs en vcc gate comp ramp ss fault 0 GFLY_CTRL2 FSW=100000 VSET=30 TSS=1m SSMODE=2 COFF=1.5 SSCLO=1.5 SSCHI=3.5 CMAX=3.5 KP=10000 CS_LIM=.16 SCMODE=0
+Cgate gate 0 1n
+.tran 0 1.8m 0 1u
+.save V(comp) V(ss) V(fault)
+.meas tran comp_middle FIND V(comp) AT 0.5m
+.meas tran comp_after AVG V(comp) FROM 1.2m TO 1.5m
+.meas tran ss_after AVG V(ss) FROM 1.2m TO 1.5m
+.end

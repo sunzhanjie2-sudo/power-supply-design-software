@@ -1,0 +1,29 @@
+{
+  "topology": "FLYBACK",
+  "V_in": 30,
+  "N": 0.5,
+  "L": 0.000008,
+  "eta_guess": 0.93,
+  "Np": 20,
+  "Ns": 0,
+  "Rs": 0.015,
+  "Vgs": 8.5,
+  "feedback_mode": "PSR-MP6005",
+  "feedback_output": 1,
+  "fc_target": 1000,
+  "pm_target": 60,
+  "psr_Na": 0,
+  "psr_aux_target": 9,
+  "psr_RfbH": 47000,
+  "psr_RfbL": 0,
+  "psr_Rreg": 6800,
+  "psr_Rcomp": 36008.005481967164,
+  "psr_Ccomp": 0.000000016863604059994855,
+  "psr_Cpole": 0.0000000012439444746412223,
+  "psr_Vcc": 8.5,
+  "outputs": [
+    {"name":"30V 主输出","V_out":30,"P_out":28,"Ns":40,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"12V 辅助","V_out":12,"P_out":8,"Ns":16,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"5V 逻辑","V_out":5,"P_out":4,"Ns":7,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100}
+  ]
+}

@@ -1,0 +1,16 @@
+Version 4
+SymbolType CELL
+LINE Normal 16 0 16 48
+LINE Normal -8 48 40 48
+LINE Normal -8 64 40 64
+LINE Normal 16 64 16 128
+WINDOW 0 48 16 Left 2
+SYMATTR Prefix X
+SYMATTR Value GPWR_CAP
+SYMATTR ModelFile GenericFlybackPWM.lib
+PIN 16 0 NONE 0
+PINATTR PinName P
+PINATTR SpiceOrder 1
+PIN 16 128 NONE 0
+PINATTR PinName N
+PINATTR SpiceOrder 2

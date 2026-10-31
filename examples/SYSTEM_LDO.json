@@ -1,0 +1,145 @@
+{
+  "schema_version": "power.system-network/2",
+  "title": "5V 到 3.3V LDO 线性稳压示例",
+  "revision": "A",
+  "sources": [
+    {
+      "id": "BUS-01",
+      "name": "系统输入源",
+      "min": 4.75,
+      "max": 5.25,
+      "capacity": 2.0,
+      "enabled": true
+    }
+  ],
+  "units": [
+    {
+      "id": "LDO-01",
+      "name": "MCU 与 ADC 线性稳压",
+      "source": {
+        "kind": "none",
+        "id": "",
+        "output": 1
+      },
+      "spec": {
+        "design_type": "ldo",
+        "topology": "LDO",
+        "V_in": 4.75,
+        "V_in_min": 4.75,
+        "V_in_max": 5.25,
+        "V_out": 3.3,
+        "I_out_min": 0.01,
+        "I_out_max": 0.1,
+        "dropout_max": 0.3,
+        "Iq_max": 5e-05,
+        "manufacturer": "",
+        "model": "",
+        "package": "",
+        "input_rating_min": 2.0,
+        "input_rating_max": 6.0,
+        "current_rating": 0.15,
+        "ambient": 50.0,
+        "theta_ja": 100.0,
+        "junction_limit": 125.0,
+        "thermal_verified": false,
+        "accuracy_pct": 1.0,
+        "output_mode": "fixed",
+        "Vref": 1.2,
+        "R_top": 10000.0,
+        "follow_input": true,
+        "C_in": 1e-06,
+        "C_out": 2.2e-06,
+        "ESR_out": 0.01,
+        "required_C_in": 1e-06,
+        "required_C_out": 1e-06,
+        "required_ESR_min": 0.0,
+        "required_ESR_max": 1.0,
+        "reverse_blocking": "unknown",
+        "enable_pin": false,
+        "power_good": false,
+        "component_management": {
+          "version": 1,
+          "zone": "I",
+          "items": {},
+          "overrides": {},
+          "override_reason": ""
+        },
+        "notes": "通用静态示例，非指定型号规格。实际型号、额定值和热阻证据须核对。",
+        "P_out": 0.33,
+        "eta_guess": 0.628257299921468
+      },
+      "rails": [
+        {
+          "V_out": 3.3,
+          "P_out": 0.33,
+          "name": "LDO 输出"
+        }
+      ],
+      "enabled": true
+    }
+  ],
+  "includeCrossRegulation": false,
+  "activeUnit": "LDO-01",
+  "layout": {
+    "nodes": {},
+    "diodes": {}
+  },
+  "workspace_kind": "power-system",
+  "loads": [
+    {
+      "id": "LOAD-01",
+      "name": "MCU",
+      "enabled": true,
+      "power": 0.165,
+      "min": 3.0,
+      "max": 3.6
+    },
+    {
+      "id": "LOAD-02",
+      "name": "ADC",
+      "enabled": true,
+      "power": 0.165,
+      "min": 3.0,
+      "max": 3.6
+    }
+  ],
+  "junctions": [],
+  "connections": [
+    {
+      "id": "LINK-001",
+      "source": {
+        "kind": "bus",
+        "id": "BUS-01",
+        "output": 1
+      },
+      "target": "LDO-01",
+      "mode": "direct",
+      "vf": 0.3,
+      "enabled": true
+    },
+    {
+      "id": "LINK-002",
+      "source": {
+        "kind": "unit",
+        "id": "LDO-01",
+        "output": 1
+      },
+      "target": "LOAD-01",
+      "mode": "direct",
+      "vf": 0.0,
+      "enabled": true
+    },
+    {
+      "id": "LINK-003",
+      "source": {
+        "kind": "unit",
+        "id": "LDO-01",
+        "output": 1
+      },
+      "target": "LOAD-02",
+      "mode": "direct",
+      "vf": 0.0,
+      "enabled": true
+    }
+  ]
+}

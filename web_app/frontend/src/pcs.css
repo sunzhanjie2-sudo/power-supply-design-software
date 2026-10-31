@@ -1,0 +1,18 @@
+:host { display: block; font-family: 'Segoe UI','Microsoft YaHei',sans-serif; color: #152238; --blue:#2376e5; --ink:#152238; --border:#dfe6ee; --muted:#68788f; --green:#119777; --ui-font:16px; font-size:13px; }
+.pcs-embedded { height: max(780px, calc(100dvh - 240px)); background:#f3f6fa; border:1px solid #dfe6ee; border-radius:11px; }
+.pcs-embedded .topbar { height:64px; padding:0 18px; background:#fff; }
+.pcs-embedded .brand, .pcs-embedded .topbar-center { display:none; }
+.pcs-embedded .header-actions { width:100%; justify-content:flex-end; flex-wrap:wrap; }
+.pcs-embedded .header-actions::before {content:'辅源设计计算'; margin-right:auto; font-weight:700; font-size:16px; color:#152238; }
+.pcs-embedded .workspace {height:calc(100% - 64px); grid-template-columns:310px minmax(0,1fr); }
+.pcs-embedded .project-heading {padding:18px 20px 14px;}
+.pcs-embedded .project-heading .breadcrumbs {color:#2376e5; letter-spacing:1px;}
+.pcs-embedded .project-heading p {display:none;}
+.pcs-embedded .result-scroll {padding:20px; background:#f3f6fa;}
+.pcs-embedded .metric-card,.pcs-embedded .card,.pcs-embedded .panel {border-radius:11px; box-shadow:0 5px 18px #1d35520a;}
+.pcs-embedded .button.primary {background:#2376e5; border-color:#2376e5;}
+.pcs-embedded .module-tabs {background:white; padding-inline:12px;}
+.pcs-embedded .module-tabs button.active {color:#2376e5; border-color:#2376e5;}
+.pcs-embedded .brand-mark {background:linear-gradient(145deg,#2d8cff,#26bbcf);}
+.pcs-modal-portal {font:14px/1.55 'Segoe UI','Microsoft YaHei',sans-serif; color:#152238;}
+@media(max-width:1150px){.pcs-embedded .workspace{grid-template-columns:270px minmax(0,1fr)} .pcs-embedded .sidebar{display:flex;position:relative;width:auto;inset:auto;transform:none} .pcs-embedded .header-actions::before{display:none}}

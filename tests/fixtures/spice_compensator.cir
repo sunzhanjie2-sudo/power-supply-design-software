@@ -1,0 +1,9 @@
+GCOMP frequency-domain contract, with saturation disabled about zero error
+.include GenericFlybackPWM.lib
+.param CTYPE=2
+Vin err 0 AC 1
+Ven en 0 1
+Xcomp err en comp 0 GCOMP TYPE={CTYPE} KP=100 FZ1=200 FP1=20000 FZ2=1000 FP2=80000 CMIN=-100 CMAX=100
+.ac dec 40 10 1e6
+.save V(comp) V(err)
+.end

@@ -1,0 +1,10 @@
+Native FRA sign and file format bench, analytic T=10/(1+s/2pi/1000)
+Vref ref 0 1
+Berror err 0 V=V(ref)-V(fb)
+Rpole err pole 1
+Cpole pole 0 {1/(2*pi*1000)}
+Boutput out 0 V=10*V(pole)
+@1 out fb fstart=100 fend=20000 oct=1 delay=5m pp0=1m tavgmin=1m tsettle=1m nmax=1
+.fra dTmax=500n
+.save V(out) V(fb)
+.end

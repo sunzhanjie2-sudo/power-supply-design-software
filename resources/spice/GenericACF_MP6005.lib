@@ -1,0 +1,25 @@
+* Original generic low-side active-clamp timing; MP6005 Rev1.1 figs5/16.
+* Depends on GenericFlybackPWM.lib; not an MPS transistor-level IC model.
+* SYNC is high when the P-channel clamp is OFF; low when ON.
+* AUXG represents the AC-coupled gate with ideal level shift, no droop.
+* Protection actively discharges AUXG here; external C/R gate discharge,
+* PSM, frequency dither, OVP and VCC startup supply are not silicon models.
+.subckt GACF_CTRL FB CS EN VCC GATE COMP RAMP SS FAULT COM SYNC AUXG params: FSW=250e3 MODE=1 DMAX=0.7 VM=5 A_CS=11 SLOPE=0 CS_LIM=0.16 TBLANK=250e-9 TONMIN=250e-9 TPROP=20e-9 VG=10 RDRV=2 UVLO=4.5 VSET=30 TSS=4.7e-3 TYPE=2 KP=100 FZ1=100 FP1=30e3 FZ2=1e3 FP2=80e3 CMAX=2 TEN=0.5e-3 SSMODE=2 SSFRAC=0.05 COFF=1.5 SSCLO=1.5 SSCHI=3.5 SCMODE=1 SCP=0.3 SCPBLANK=250e-9 OLPEN=1 TOLP=4.8e-3 THOLD=50e-6 TOFF=340e-3 CS_TAU=15e-9 TDEAD=100e-9 RSYNC=5
+Xmain FB CS EN VCC GATE COMP RAMP SS FAULT COM GFLY_CTRL2 FSW={FSW} MODE={MODE} DMAX={DMAX} VM={VM} A_CS={A_CS} SLOPE={SLOPE} CS_LIM={CS_LIM} TBLANK={TBLANK} TONMIN={TONMIN} TPROP={TPROP} VG={VG} RDRV={RDRV} UVLO={UVLO} VSET={VSET} TSS={TSS} TYPE={TYPE} KP={KP} FZ1={FZ1} FP1={FP1} FZ2={FZ2} FP2={FP2} CMAX={CMAX} TEN={TEN} SSMODE={SSMODE} SSFRAC={SSFRAC} COFF={COFF} SSCLO={SSCLO} SSCHI={SSCHI} SCMODE={SCMODE} SCP={SCP} SCPBLANK={SCPBLANK} OLPEN={OLPEN} TOLP={TOLP} THOLD={THOLD} TOFF={TOFF} CS_TAU={CS_TAU}
+Bage age COM V=(time*{FSW}-floor(time*{FSW}))/{FSW}
+Boffage offage COM V=idt(1,0,V(GATE,COM)>{VG/2})
+Bauxon auxon COM V=if((V(SS,COM)>0)&(V(FAULT,COM)<0.5)&(V(EN,COM)>0.5)&(V(VCC,COM)>{UVLO})&(V(GATE,COM)<{VG/2})&(V(offage,COM)>{TDEAD})&(V(age,COM)>{TDEAD})&(V(age,COM)<{1/FSW-TDEAD}),1,0)
+Bsync SYNC COM V={VG}*(1-V(auxon,COM))
+Bauxdrive auxdrive COM V=-{VG}*V(auxon,COM)
+Rauxdrive auxdrive AUXG {RSYNC}
+Rauxgate AUXG COM 1e9
+.ends GACF_CTRL
+
+* P-channel low-side switch: source=primary ground; body diode D -> S.
+.subckt GACF_PMOS D G S params: RON=0.1 COSS=200e-12 CG=1e-9 VG=10 CJ=20e-12
+Smain D S S G PSW
+.model PSW SW(Ron={RON} Roff=1e9 Vt={VG/2} Vh={-VG*0.2})
+Coss D S {COSS}
+Cgate G S {CG}
+Xbody D S GPWR_DIODE VF=0.8 CJ={CJ}
+.ends GACF_PMOS

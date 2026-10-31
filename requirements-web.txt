@@ -1,0 +1,6 @@
+-r requirements.txt
+# Install into .venv-web, never into the desktop environment.
+fastapi==0.159.1
+uvicorn==0.52.4
+starlette==1.6.0
+pydantic==2.12.5

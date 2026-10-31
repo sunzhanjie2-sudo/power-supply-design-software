@@ -71,7 +71,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/setup_web.ps1
 
 准备脚本安装本项目环境的依赖并构建 Vue 前端。本地网页版通过 `127.0.0.1` 服务调用本机 Python 内核，不能只双击其中的 HTML 来替代服务。首次安装依赖需要联网，日常计算不用联网。
 
-浏览器独立 TypeScript 内核见[内核说明](docs/PCS_NATIVE_ENGINE.md)。其适用范围和 Python 版需要分别核对。
+前端还保留独立 TypeScript 计算内核，其适用范围和 Python 版需要分别核对；组织专用的集成说明和部署脚本不在公开仓库中。
 
 ### Python API 与 CLI
 

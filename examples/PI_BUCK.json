@@ -1,0 +1,11 @@
+{
+  "topology": "BUCK",
+  "control_mode": "PCM",
+  "controller_type": "PI",
+  "V_in": 12,
+  "V_out": 5,
+  "P_out": 5,
+  "f_sw": 100000,
+  "L": 0.000047,
+  "C_out": 0.0001
+}

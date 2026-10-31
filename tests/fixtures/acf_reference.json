@@ -1,0 +1,391 @@
+{
+  "basis": "Real archived LTspice .meas and FRA; no generated measurements",
+  "cases": [
+    {
+      "voltage": 20.0,
+      "measurements": {
+        "fault_max": 0.0,
+        "gate_mean": 5.40842997799,
+        "duty_avg": 0.543758703937,
+        "input_voltage": 20.0,
+        "switching_period": 3.99999994675e-06,
+        "frequency_actual": 250000.003328,
+        "primary_rms": 2.74480407756,
+        "primary_avg": 1.90770293447,
+        "vcs_peak": 0.381414353848,
+        "out1_before": 29.9972246703,
+        "out1_cap_before": 30.6982245734,
+        "out1_earlier": 29.9971598024,
+        "out1_pre_ripple": 0.0026969909668,
+        "out1_winding_rms": 0.717245088245,
+        "out1_winding_avg": 0.546389045746,
+        "out1_winding_peak": 1.0341707468,
+        "out1_diode_reverse": 196.786880255,
+        "out1_after": 29.9294690587,
+        "out1_ripple": 0.0285453796387,
+        "out1_load_min": 29.8842544556,
+        "out1_load_max": 31.1607189178,
+        "out2_before": 13.7022612005,
+        "out2_cap_before": 14.4023531606,
+        "out2_earlier": 13.701119404,
+        "out2_pre_ripple": 0.00109672546387,
+        "out2_winding_rms": 0.0689436395792,
+        "out2_winding_avg": 0.0514743210459,
+        "out2_winding_peak": 0.108151696622,
+        "out2_diode_reverse": 67.5082437396,
+        "out2_after": 12.9309131651,
+        "out2_ripple": 0.0393810272217,
+        "out2_load_min": 12.8510065079,
+        "out2_load_max": 13.7556753159,
+        "out3_before": 5.49758202573,
+        "out3_cap_before": 6.19804372893,
+        "out3_earlier": 5.49726830014,
+        "out3_pre_ripple": 0.00164318084717,
+        "out3_winding_rms": 0.341277186632,
+        "out3_winding_avg": 0.256951001996,
+        "out3_winding_peak": 0.493419915438,
+        "out3_diode_reverse": 29.873470068,
+        "out3_after": 5.16772374871,
+        "out3_ripple": 0.0134768486023,
+        "out3_load_min": 5.14744281769,
+        "out3_load_max": 5.61386346817,
+        "primary_peak": 4.08387517929,
+        "vds_peak": 46.59219219,
+        "gate_overlap": 0.0,
+        "clamp_mean": 41.9638423341,
+        "clamp_ripple": 6.74296047026,
+        "clamp_current_rms": 0.684348915925,
+        "reset_voltsecond": 2.14608569143e-05,
+        "out1_choke_rms": 1.00043078311,
+        "out1_choke_peak": 1.03479385376,
+        "out1_choke_valley": 0.964946806431,
+        "out1_free_reverse": 134.215332031,
+        "out2_choke_rms": 0.0923006658776,
+        "out2_choke_peak": 0.102375328541,
+        "out2_choke_valley": 0.0834703445435,
+        "out2_free_reverse": 48.8183860779,
+        "out3_choke_rms": 0.461683289235,
+        "out3_choke_peak": 0.493576139212,
+        "out3_choke_valley": 0.434077203274,
+        "out3_free_reverse": 20.7159404755
+      },
+      "loop": {
+        "fc": 134.79916299298392,
+        "pm": 49.78988069998505
+      },
+      "cross": [
+        {
+          "id": "X001",
+          "powers": [
+            30.0,
+            1.0,
+            2.0
+          ],
+          "simulation": [
+            29.9971796626,
+            13.7021540557,
+            5.49758878851
+          ],
+          "settled": true
+        },
+        {
+          "id": "X002",
+          "powers": [
+            2.0,
+            1.0,
+            2.0
+          ],
+          "simulation": [
+            29.9999264049,
+            12.1908738643,
+            4.8131682522
+          ],
+          "settled": true
+        },
+        {
+          "id": "X003",
+          "powers": [
+            2.0,
+            0.3,
+            2.0
+          ],
+          "simulation": [
+            29.9999340987,
+            12.2693362124,
+            4.81400371366
+          ],
+          "settled": true
+        },
+        {
+          "id": "X004",
+          "powers": [
+            30.0,
+            0.3,
+            2.0
+          ],
+          "simulation": [
+            29.9989630266,
+            13.7757755847,
+            5.497121434
+          ],
+          "settled": true
+        },
+        {
+          "id": "X005",
+          "powers": [
+            30.0,
+            0.3,
+            0.5
+          ],
+          "simulation": [
+            29.9992904565,
+            13.7853149968,
+            5.55827358803
+          ],
+          "settled": true
+        },
+        {
+          "id": "X006",
+          "powers": [
+            2.0,
+            0.3,
+            0.5
+          ],
+          "simulation": [
+            30.0005905635,
+            12.2301427242,
+            4.8465214336
+          ],
+          "settled": true
+        },
+        {
+          "id": "X007",
+          "powers": [
+            2.0,
+            1.0,
+            0.5
+          ],
+          "simulation": [
+            29.9996555507,
+            12.1519643454,
+            4.8477887609
+          ],
+          "settled": true
+        },
+        {
+          "id": "X008",
+          "powers": [
+            30.0,
+            1.0,
+            0.5
+          ],
+          "simulation": [
+            29.9990355789,
+            13.7003841606,
+            5.55673358591
+          ],
+          "settled": true
+        }
+      ],
+      "model_sha256": {
+        "GenericACF_MP6005.lib": "15121826a4b29e807f261a2fa95a8130147562d40a143c4ccf4bd03ec1f4771c",
+        "GenericFlybackPWM.lib": "f39ab3ad5e18d383a3db770e377388030335bb5577759b13011cdedf311f317b",
+        "power_stage.inc": "3783b3b0655297cb07d06a2ed8c2d588369486bef46ab577831fb80442c83f8d",
+        "coupling.inc": "7eb481076f18e56a8198f1696d8dcaa0a4d1e6cfd892307f49966399f323b410"
+      }
+    },
+    {
+      "voltage": 30.0,
+      "measurements": {
+        "fault_max": 0.0,
+        "gate_mean": 3.53329764389,
+        "duty_avg": 0.35522894557,
+        "input_voltage": 30.0,
+        "switching_period": 3.99971102741e-06,
+        "frequency_actual": 250018.062092,
+        "primary_rms": 2.30073193498,
+        "primary_avg": 1.25169231459,
+        "vcs_peak": 0.491435915232,
+        "out1_before": 29.9976983368,
+        "out1_cap_before": 30.6986982581,
+        "out1_earlier": 29.9978512252,
+        "out1_pre_ripple": 0.00295639038086,
+        "out1_winding_rms": 0.59804600136,
+        "out1_winding_avg": 0.38860039662,
+        "out1_winding_peak": 1.05252921581,
+        "out1_diode_reverse": 149.374022663,
+        "out1_after": 29.9511029273,
+        "out1_ripple": 0.0279121398926,
+        "out1_load_min": 29.8813896179,
+        "out1_load_max": 31.1694259644,
+        "out2_before": 13.6994614333,
+        "out2_cap_before": 14.3995533748,
+        "out2_earlier": 13.6985981927,
+        "out2_pre_ripple": 0.000958442687988,
+        "out2_winding_rms": 0.0566696006455,
+        "out2_winding_avg": 0.0341904784377,
+        "out2_winding_peak": 0.136756002903,
+        "out2_diode_reverse": 52.3658186197,
+        "out2_after": 12.8871701637,
+        "out2_ripple": 0.00420570373535,
+        "out2_load_min": 12.8858442307,
+        "out2_load_max": 13.7523565292,
+        "out3_before": 5.49591293955,
+        "out3_cap_before": 6.19637450126,
+        "out3_earlier": 5.49576431004,
+        "out3_pre_ripple": 0.0017786026001,
+        "out3_winding_rms": 0.283154875025,
+        "out3_winding_avg": 0.177877578426,
+        "out3_winding_peak": 0.519609689713,
+        "out3_diode_reverse": 22.7217290401,
+        "out3_after": 5.14501962859,
+        "out3_ripple": 0.00580644607544,
+        "out3_load_min": 5.10761213303,
+        "out3_load_max": 5.61190271378,
+        "primary_peak": 4.19532108307,
+        "vds_peak": 50.4112054319,
+        "gate_overlap": 0.0,
+        "clamp_mean": 44.671008798,
+        "clamp_ripple": 9.74652333304,
+        "clamp_current_rms": 0.812401450137,
+        "reset_voltsecond": -7.49563345362e-06,
+        "out1_choke_rms": 1.00021214071,
+        "out1_choke_peak": 1.04566693306,
+        "out1_choke_valley": 0.952352166176,
+        "out1_free_reverse": 208.927215576,
+        "out2_choke_rms": 0.0922740336333,
+        "out2_choke_peak": 0.106006875634,
+        "out2_choke_valley": 0.078935444355,
+        "out2_free_reverse": 75.7194900513,
+        "out3_choke_rms": 0.46219186221,
+        "out3_choke_peak": 0.505781292915,
+        "out3_choke_valley": 0.42006701231,
+        "out3_free_reverse": 31.4247188568
+      },
+      "loop": {
+        "fc": 139.22623895785966,
+        "pm": 51.96614243867738
+      },
+      "cross": [
+        {
+          "id": "X001",
+          "powers": [
+            30.0,
+            1.0,
+            2.0
+          ],
+          "simulation": [
+            29.9977430313,
+            13.6994122026,
+            5.49594294367
+          ],
+          "settled": true
+        },
+        {
+          "id": "X002",
+          "powers": [
+            2.0,
+            1.0,
+            2.0
+          ],
+          "simulation": [
+            29.9985334049,
+            11.9512300026,
+            4.703153841
+          ],
+          "settled": true
+        },
+        {
+          "id": "X003",
+          "powers": [
+            2.0,
+            0.3,
+            2.0
+          ],
+          "simulation": [
+            30.0001032763,
+            12.0431538704,
+            4.70359811712
+          ],
+          "settled": true
+        },
+        {
+          "id": "X004",
+          "powers": [
+            30.0,
+            0.3,
+            2.0
+          ],
+          "simulation": [
+            29.999009836,
+            13.8553839573,
+            5.49592020261
+          ],
+          "settled": true
+        },
+        {
+          "id": "X005",
+          "powers": [
+            30.0,
+            0.3,
+            0.5
+          ],
+          "simulation": [
+            29.9987152466,
+            13.8450411458,
+            5.54899723495
+          ],
+          "settled": true
+        },
+        {
+          "id": "X006",
+          "powers": [
+            2.0,
+            0.3,
+            0.5
+          ],
+          "simulation": [
+            30.0014587307,
+            12.173325484,
+            4.73983804949
+          ],
+          "settled": true
+        },
+        {
+          "id": "X007",
+          "powers": [
+            2.0,
+            1.0,
+            0.5
+          ],
+          "simulation": [
+            30.0085116801,
+            11.99276609,
+            4.77145500578
+          ],
+          "settled": true
+        },
+        {
+          "id": "X008",
+          "powers": [
+            30.0,
+            1.0,
+            0.5
+          ],
+          "simulation": [
+            29.9995340724,
+            13.6920821494,
+            5.5506792137
+          ],
+          "settled": true
+        }
+      ],
+      "model_sha256": {
+        "GenericACF_MP6005.lib": "15121826a4b29e807f261a2fa95a8130147562d40a143c4ccf4bd03ec1f4771c",
+        "GenericFlybackPWM.lib": "f39ab3ad5e18d383a3db770e377388030335bb5577759b13011cdedf311f317b",
+        "power_stage.inc": "3783b3b0655297cb07d06a2ed8c2d588369486bef46ab577831fb80442c83f8d",
+        "coupling.inc": "7eb481076f18e56a8198f1696d8dcaa0a4d1e6cfd892307f49966399f323b410"
+      }
+    }
+  ]
+}

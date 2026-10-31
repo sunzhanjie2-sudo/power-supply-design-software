@@ -1,0 +1,31 @@
+{
+  "__description__": "三路 SSR 耦合反激交叉调整率示例；最小功耗为演示输入，不代表推荐预负载",
+  "topology": "FLYBACK",
+  "feedback_mode": "SSR",
+  "feedback_output": 1,
+  "V_in_min": 20,
+  "V_in_max": 30,
+  "input_voltage_case": "min",
+  "V_out": 30,
+  "P_out": 40,
+  "f_sw": 250000,
+  "L": 0.000008,
+  "N": 0.5,
+  "Np": 6,
+  "Ns": 12,
+  "MLT": 0.04,
+  "d_wire_p": 0.0001,
+  "n_strand_p": 40,
+  "Kc": 1.5,
+  "dC": 0.1,
+  "eta_guess": 0.93,
+  "outputs": [
+    {"name":"主反馈30V","V_out":30,"P_out":30,"P_out_min":3,"Ns":12,"C_out":0.00033,"Rc":0.04,"d_wire_s":0.0001,"n_strand_s":30},
+    {"name":"轻载12V","P_out":0.5,"P_out_min":0.05,"Ns":5,"C_out":0.00022,"Rc":0.04,"d_wire_s":0.0001,"n_strand_s":10},
+    {"name":"辅助5V","P_out":9.5,"P_out_min":0.95,"Ns":2,"C_out":0.00047,"Rc":0.02,"d_wire_s":0.0001,"n_strand_s":20}
+  ],
+  "coupling_config": {
+    "enabled": true,
+    "k": [[1,0.995,0.995,0.995],[0.995,1,0.995,0.995],[0.995,0.995,1,0.995],[0.995,0.995,0.995,1]]
+  }
+}

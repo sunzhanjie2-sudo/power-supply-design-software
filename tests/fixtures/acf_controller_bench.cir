@@ -1,0 +1,21 @@
+ACF complementary gate and fault timing regression
+.include GenericFlybackPWM.lib
+.include GenericACF_MP6005.lib
+Vfb fb 0 0
+Ven en 0 1
+Vcc vcc 0 10
+Bcs sense 0 V=if(time>0.8e-3,0.35,0.015)
+Xctrl fb sense en vcc gate comp ramp ss fault 0 sync auxgate GACF_CTRL VSET=1 KP=1e6 TEN=0 TSS=0.1e-3 SSMODE=0 CS_LIM=0.16 SCP=0.3 SCMODE=2 OLPEN=0 SLOPE=100000 TDEAD=100e-9
+Cgate gate 0 1e-9
+Caux auxgate 0 1e-9
+Boverlap overlap 0 V=if((V(gate,sense)>5)&(V(auxgate)<-5),1,0)
+.options threads=2 method=gear plotwinsize=300
+.tran 0 1e-3 0 10e-9
+.save V(gate) V(sense) V(auxgate) V(sync) V(fault) V(overlap)
+.meas tran overlap_max MAX V(overlap)
+.meas tran main_active MAX V(gate) FROM 0.2e-3 TO 0.7e-3
+.meas tran aux_active MIN V(auxgate) FROM 0.2e-3 TO 0.7e-3
+.meas tran fault_latched MIN V(fault) FROM 0.85e-3 TO 1e-3
+.meas tran main_off MAX V(gate) FROM 0.85e-3 TO 1e-3
+.meas tran aux_off MIN V(auxgate) FROM 0.85e-3 TO 1e-3
+.end

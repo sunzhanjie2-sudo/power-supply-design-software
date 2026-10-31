@@ -1,0 +1,15 @@
+Generic protective state-machine regression, time-scaled retry for test
+.include GenericFlybackPWM.lib
+.param SCM=1 CSX=.4 OLPE=0
+Vcc vcc 0 10
+Ven en 0 PWL(0 1 4.5m 1 4.5001m 0 5m 0 5.0001m 1)
+Vg gate 0 PULSE(0 10 0 5n 5n 5u 10u)
+Vcs cs 0 PWL(0 0 1m 0 1.0001m {CSX} 1.5m {CSX} 1.5001m 0)
+Xprotect cs gate en vcc run ss ilim fault olpt 0 GPROTECT FSW=100e3 TEN=50e-6 TSS=300e-6 CS_LIM=.16 SCMODE={SCM} SCP=.3 SCPBLANK=100e-9 OLPEN={OLPE} TOLP=200e-6 THOLD=50e-6 TOFF=2e-3 TBLANK=100e-9
+.tran 0 6m 0 1e-6
+.save V(run) V(ss) V(ilim) V(fault) V(olpt) V(cs) V(en)
+.meas tran fault_mid AVG V(fault) FROM 1.3m TO 1.4m
+.meas tran fault_late AVG V(fault) FROM 3.5m TO 4m
+.meas tran fault_disabled MAX V(fault) FROM 4.6m TO 4.8m
+.meas tran ss_restarted AVG V(ss) FROM 5.5m TO 5.8m
+.end

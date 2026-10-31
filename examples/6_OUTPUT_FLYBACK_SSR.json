@@ -1,0 +1,22 @@
+{
+  "topology": "FLYBACK",
+  "V_in": 30.0,
+  "N": 0.5,
+  "L": 0.000008,
+  "f_sw": 250000.0,
+  "eta_guess": 0.93,
+  "Np": 50,
+  "Ns": 0,
+  "core_choice": "PQ32-25",
+  "core_shape": "PQ",
+  "feedback_mode": "SSR",
+  "feedback_output": 1,
+  "outputs": [
+    {"name":"30V 主输出","V_out":30,"P_out":20,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"12V 辅助","V_out":12,"P_out":8,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"5V 逻辑","V_out":5,"P_out":4,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"3.3V 逻辑","V_out":3.3,"P_out":2,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"24V 接口","V_out":24,"P_out":4,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100},
+    {"name":"15V 驱动","V_out":15,"P_out":2,"Ns":0,"d_wire_s":0,"n_strand_s":10,"C_out":0.000220,"C_out2":0.000100}
+  ]
+}

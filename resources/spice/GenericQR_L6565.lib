@@ -1,0 +1,44 @@
+* Event-driven QR flyback controller, inspired by ST L6565. Original model.
+* NOT a manufacturer silicon model. External ideal SSR compensation/reference SS.
+* COMP/RAMP are in the calculator amplified-CS domain; chip COMP is reconstructed
+* internally: 2.5+3*COMP/(A_CS*CS0). FSW is not a clock in this model.
+.subckt GQR_CTRL FB CS EN VCC GATE COMP RAMP SS FAULT COM ZCD params: A_CS=11 CS0=1.4 VFF=0 VSET=60 TSS=20m TYPE=3 KP=100 FZ1=1k FP1=100k FZ2=10k FP2=500k RDRV=3 VG=10 UVON=13.5 UVOFF=9.5 TLEB=50n TONMIN=100n TPROP=200n CS_TAU=200n ZARM=2.1 ZTRIG=1.6 ZDELAY=0 TOFFMIN=3.5u TOFFLIGHT=18u TSTART=400u OCP=2 TONMAX=100u
+Auvlo VCC COM COM COM COM COM uv COM SCHMITT Vt={(UVON+UVOFF)/2} Vh={(UVON-UVOFF)/2} Vhigh=1 Vlow=0 Td=10n Trise=10n Tfall=10n
+Bactive active COM V=if((V(uv,COM)>.5)&(V(EN,COM)>.5)&(V(FAULT,COM)<.5),1,0)
+Bss SS COM V=limit(idt(1/{TSS},0,V(active,COM)<.5),0,1)
+Berr err COM V={VSET}*V(SS,COM)-V(FB,COM)
+Xcomp err active COMP COM GCOMP TYPE={TYPE} KP={KP} FZ1={FZ1} FP1={FP1} FZ2={FZ2} FP2={FP2} CMAX={A_CS*CS0*(1-VFF/3)}
+Bchip chip_comp COM V=2.5+3*V(COMP,COM)/{A_CS*CS0}
+Rcs CS filtered 1
+Ccs filtered COM {CS_TAU}
+Bramp RAMP COM V={A_CS}*V(filtered,COM)
+Boff offage COM V=idt(1,0,(V(q,COM)>.5)|(V(active,COM)<.5))
+Bon onage COM V=idt(1,0,V(q,COM)<.5)
+Bblank blank_time COM V=max({TOFFMIN},{TOFFLIGHT}+({TOFFMIN-TOFFLIGHT})/0.7*(V(chip_comp,COM)-2.5))
+Bzd zd COM V=delay(V(ZCD,COM),{ZDELAY})
+Azcd zd COM COM COM COM falling COM COM SCHMITT Vt={(ZARM+ZTRIG)/2} Vh={(ZARM-ZTRIG)/2} Vhigh=1 Vlow=0 Td=10n Trise=5n Tfall=5n
+Barm armed COM V=if(idt(if(V(zd,COM)>{ZARM},1,0),0,V(q,COM)>.5)>1e-9,1,0)
+Bedge edge COM V=max(0,V(falling,COM)-delay(V(falling,COM),50n))
+Btrip trip COM V=if((V(uv,COM)>.5)&(V(filtered,COM)>{OCP}),1,0)
+Bclear clear COM V=if(V(uv,COM)<.5,1,0)
+Afault trip clear COM COM COM COM FAULT COM SRFLOP Vhigh=1 Vlow=0 Td=20n Trise=5n Tfall=5n
+Breset reset COM V=if((V(active,COM)<.5)|((V(q,COM)>.5)&((V(onage,COM)>{TONMAX})|((V(onage,COM)>{max(TLEB,TONMIN)})&(V(RAMP,COM)>=V(COMP,COM))))),1,0)
+Bset set COM V=if((V(active,COM)>.5)&(V(q,COM)<.5)&(V(reset,COM)<.5)&(V(COMP,COM)>.001)&((V(offage,COM)>{TSTART})|((V(offage,COM)>V(blank_time,COM))&(V(armed,COM)>.5)&(V(edge,COM)>.5))),1,0)
+Alatch set reset COM COM COM COM q COM SRFLOP Vhigh=1 Vlow=0 Td={TPROP} Trise=5n Tfall=5n
+Bdrive drive COM V=if(V(active,COM)>.5,{VG}*V(q,COM),0)
+Rdriver drive GATE {RDRV}
+Rgate GATE COM 1e9
+.ends GQR_CTRL
+
+* Unloaded auxiliary-winding voltage replica with explicit RC and pin clamps.
+* Sense circuit only: does not provide VCC or consume transformer winding power.
+.subckt GQR_ZCD DRAIN VIN ZCD COM params: RATIO=.1 RZ=22k CZ=5p
+Baux aux COM V={RATIO}*V(DRAIN,VIN)
+Rz aux ZCD {RZ}
+Cz ZCD COM {CZ}
+Dhi ZCD high DCLAMP
+Dlo low ZCD DCLAMP
+Vhigh high COM 5.2
+Vlow low COM .65
+.model DCLAMP D(Ron=.1 Roff=1e12 Vfwd=0)
+.ends GQR_ZCD

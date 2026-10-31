@@ -1,0 +1,114 @@
+* GenericFlybackPWM 3.0 -- LTspice behavioral PWM building blocks.
+* Original implementation. NOT an MP6005 silicon model.
+* Voltages are referenced to COM. Frequencies Hz, slope V/s, times seconds.
+* CORE: COMP CS EN VCC GATE RAMP COM. MODE=1 peak current, MODE=0 voltage.
+.subckt GPWM_CORE COMP CS EN VCC GATE RAMP COM params: FSW=250e3 MODE=1 DMAX=0.7 VM=1 A_CS=1 SLOPE=0 CS_LIM=1 TBLANK=100e-9 TONMIN=100e-9 TPROP=20e-9 VG=10 RDRV=2 UVLO=4.5
+Vclock clock COM PULSE(0 1 0 1e-9 1e-9 {min(20e-9,0.01/FSW)} {1/FSW})
+Bage age COM V=(time*{FSW}-floor(time*{FSW}))/{FSW}
+Bon active COM V=if((V(EN,COM)>0.5)&(V(VCC,COM)>{UVLO}),1,0)
+Bramp RAMP COM V=if({MODE}>0.5,{A_CS}*V(CS,COM)+{SLOPE}*V(age,COM),{VM}*{FSW}*V(age,COM))
+Breset reset COM V=if((V(active,COM)<0.5)|(V(age,COM)>={DMAX/FSW})|((V(age,COM)>={TBLANK})&(V(CS,COM)>={CS_LIM}))|((V(age,COM)>={max(TBLANK,TONMIN)})&(V(RAMP,COM)>=V(COMP,COM))),1,0)
+Bset set COM V=if((V(clock,COM)>0.5)&(V(active,COM)>0.5)&(V(reset,COM)<0.5),1,0)
+Alatch set reset COM COM COM COM q COM SRFLOP Vhigh=1 Vlow=0 Td={TPROP} Trise=5e-9 Tfall=5e-9
+Bdrive drive COM V=if(V(active,COM)>0.5,{VG}*V(q,COM),0)
+Rdriver drive GATE {RDRV}
+Rgate GATE COM 1e9
+.ends GPWM_CORE
+
+* GCOMP: error EN COMP COM. Small signal transfer:
+* TYPE=2: KP*(1+s/wz1)/(s*(1+s/wp1)).
+* TYPE=3: the above times (1+s/wz2)/(1+s/wp2).
+* Integral state freezes when saturated in the direction of the error.
+.subckt GCOMP ERR EN COMP COM params: TYPE=2 KP=100 FZ1=100 FP1=30e3 FZ2=1e3 FP2=80e3 CMIN=0 CMAX=2
+Bint integ COM V=idt(if(V(EN,COM)<0.5,0,if(((V(raw,COM)>={CMAX})&(V(ERR,COM)>0))|((V(raw,COM)<={CMIN})&(V(ERR,COM)<0)),0,{KP}*V(ERR,COM))),0,V(EN,COM)<0.5)
+Blead lead COM V=V(integ,COM)+{KP/(2*pi*FZ1)}*V(ERR,COM)
+Rlp1 lead lp1 1
+Clp1 lp1 COM {1/(2*pi*FP1)}
+Bbuffer stage2 COM V=V(lp1,COM)
+Rlp2 stage2 lp2 1
+Clp2 lp2 COM {1/(2*pi*FP2)}
+Braw raw COM V=if({TYPE}>2.5,{FP2/FZ2}*V(lp1,COM)+(1-{FP2/FZ2})*V(lp2,COM),V(lp1,COM))
+Blimit COMP COM V=if(V(EN,COM)>0.5,limit(V(raw,COM),{CMIN},{CMAX}),0)
+.ends GCOMP
+
+* GFLY_CTRL: FB CS EN VCC GATE COMP RAMP SS COM.
+* FB is already isolated and scaled by the user's feedback network.
+* VSET is in those same FB volts. SS ramps 0..1 and resets on disable/UVLO.
+* Use CORE alone to connect an arbitrary external error amplifier to COMP.
+.subckt GFLY_CTRL FB CS EN VCC GATE COMP RAMP SS COM params: FSW=250e3 MODE=1 DMAX=0.7 VM=1 A_CS=1 SLOPE=0 CS_LIM=1 TBLANK=100e-9 TONMIN=100e-9 TPROP=20e-9 VG=10 RDRV=2 UVLO=4.5 VSET=30 TSS=1e-3 TYPE=2 KP=100 FZ1=100 FP1=30e3 FZ2=1e3 FP2=80e3 CMAX=2
+Bon active COM V=if((V(EN,COM)>0.5)&(V(VCC,COM)>{UVLO}),1,0)
+Bss SS COM V=limit(idt(if(V(active,COM)>0.5,1/{TSS},0),0,V(active,COM)<0.5),0,1)
+Berror error COM V={VSET}*V(SS,COM)-V(FB,COM)
+Xcomp error active COMP COM GCOMP TYPE={TYPE} KP={KP} FZ1={FZ1} FP1={FP1} FZ2={FZ2} FP2={FP2} CMAX={CMAX}
+Xcore COMP CS active VCC GATE RAMP COM GPWM_CORE FSW={FSW} MODE={MODE} DMAX={DMAX} VM={VM} A_CS={A_CS} SLOPE={SLOPE} CS_LIM={CS_LIM} TBLANK={TBLANK} TONMIN={TONMIN} TPROP={TPROP} VG={VG} RDRV={RDRV} UVLO={UVLO}
+.ends GFLY_CTRL
+
+* Extended core with an external raw-CS limit and absolute COMP offset.
+.subckt GPWM_CORE2 COMP CS EN VCC GATE RAMP ILIM COM params: FSW=250e3 MODE=1 DMAX=0.7 VM=1 A_CS=1 SLOPE=0 TBLANK=100e-9 TONMIN=100e-9 TPROP=20e-9 VG=10 RDRV=2 UVLO=4.5 COFF=0
+Vclock clock COM PULSE(0 1 0 1e-9 1e-9 {min(20e-9,0.01/FSW)} {1/FSW})
+Bage age COM V=(time*{FSW}-floor(time*{FSW}))/{FSW}
+Bon active COM V=if((V(EN,COM)>0.5)&(V(VCC,COM)>{UVLO}),1,0)
+Bramp RAMP COM V=if({MODE}>0.5,{A_CS}*V(CS,COM)+{SLOPE}*V(age,COM),{VM}*{FSW}*V(age,COM))
+Breset reset COM V=if((V(active,COM)<0.5)|(V(age,COM)>={DMAX/FSW})|((V(age,COM)>={TBLANK})&(V(CS,COM)>=V(ILIM,COM)))|((V(age,COM)>={max(TBLANK,TONMIN)})&(V(RAMP,COM)>=max(0,V(COMP,COM)-{COFF}))),1,0)
+Bset set COM V=if((V(clock,COM)>0.5)&(V(active,COM)>0.5)&(V(reset,COM)<0.5)&(V(COMP,COM)>{COFF}),1,0)
+Alatch set reset COM COM COM COM q COM SRFLOP Vhigh=1 Vlow=0 Td={TPROP} Trise=5e-9 Tfall=5e-9
+Bdrive drive COM V=if(V(active,COM)>0.5,{VG}*V(q,COM),0)
+Rdriver drive GATE {RDRV}
+Rgate GATE COM 1e9
+.ends GPWM_CORE2
+
+* MP6005-inspired supervisory state machine; no proprietary implementation.
+* SCMODE=0 cycle limit only, 1 hiccup, 2 latch until disable/UVLO.
+* OLP: after soft start, an OCP pulse refreshes a normalized hold timer.
+.subckt GPROTECT CS GATE EN VCC RUN SS ILIM FAULT OLPSTATE COM params: FSW=250e3 VG=10 UVLO=4.5 TEN=0 TSS=1e-3 SSMODE=0 SSFRAC=0.05 CS_LIM=0.16 SCMODE=0 SCP=0.3 SCPBLANK=250e-9 OLPEN=0 TOLP=4.8e-3 THOLD=50e-6 TOFF=340e-3 TBLANK=250e-9
+Benabled enabled COM V=if((V(EN,COM)>0.5)&(V(VCC,COM)>{UVLO}),1,0)
+Bready ready COM V=if(V(enabled,COM)>0.5,if({TEN}<=0,1,limit(idt(1/{max(TEN,1e-9)},0,V(enabled,COM)<0.5),0,1)),0)
+Bage age COM V=(time*{FSW}-floor(time*{FSW}))/{FSW}
+Brun RUN COM V=if((V(ready,COM)>=0.999)&(V(enabled,COM)>0.5)&(V(FAULT,COM)<0.5),1,0)
+Bss SS COM V=limit(idt(if(V(RUN,COM)>0.5,1/{TSS},0),0,V(RUN,COM)<0.5),0,1)
+Blim ILIM COM V={CS_LIM}*if({SSMODE}==1,{SSFRAC}+(1-{SSFRAC})*V(SS,COM),1)
+Bocp ocp COM V=if((V(RUN,COM)>0.5)&(V(GATE,COM)>{VG/2})&(V(age,COM)>={TBLANK})&(V(CS,COM)>=V(ILIM,COM)),1,0)
+Bseen seen COM V=if(idt(V(ocp,COM),0,V(RUN,COM)<0.5)>1e-12,1,0)
+Bhold hold COM V=idt(1/{THOLD},0,(V(ocp,COM)>0.5)|(V(RUN,COM)<0.5))
+Bover over COM V=if((V(seen,COM)>0.5)&(V(hold,COM)<1)&(V(SS,COM)>0.999)&({OLPEN}>0.5),1,0)
+Btimer OLPSTATE COM V=limit(idt(1/{TOLP},0,V(over,COM)<0.5),0,1.01)
+Bscp scp COM V=if((V(RUN,COM)>0.5)&(V(GATE,COM)>{VG/2})&(V(age,COM)>={SCPBLANK})&(V(CS,COM)>={SCP}),1,0)
+Btrip trip COM V=if(({SCMODE}>0.5)&((V(scp,COM)>0.5)|(V(OLPSTATE,COM)>=1)),1,0)
+Boff offage COM V=limit(idt(1/{TOFF},0,V(FAULT,COM)<0.5),0,1.01)
+Breset reset COM V=if((V(enabled,COM)<0.5)|(({SCMODE}<1.5)&(V(offage,COM)>=1)),1,0)
+Bset set COM V=if((V(trip,COM)>0.5)&(V(reset,COM)<0.5),1,0)
+Afault set reset COM COM COM COM FAULT COM SRFLOP Vhigh=1 Vlow=0 Td=5e-9 Trise=5e-9 Tfall=5e-9
+.ends GPROTECT
+
+* Public v2 interface adds FAULT; SS modes 0 reference, 1 CS limit, 2 COMP.
+.subckt GFLY_CTRL2 FB CS EN VCC GATE COMP RAMP SS FAULT COM params: FSW=250e3 MODE=1 DMAX=0.7 VM=1 A_CS=1 SLOPE=0 CS_LIM=1 TBLANK=100e-9 TONMIN=100e-9 TPROP=20e-9 VG=10 RDRV=2 UVLO=4.5 VSET=30 TSS=1e-3 TYPE=2 KP=100 FZ1=100 FP1=30e3 FZ2=1e3 FP2=80e3 CMAX=2 TEN=0 SSMODE=0 SSFRAC=0.05 COFF=0 SSCLO=1.5 SSCHI=3.5 SCMODE=0 SCP=0.3 SCPBLANK=250e-9 OLPEN=0 TOLP=4.8e-3 THOLD=50e-6 TOFF=340e-3 CS_TAU=0
+Rcs CS cs_filtered 1
+Ccs cs_filtered COM {CS_TAU}
+Xsuper cs_filtered GATE EN VCC active SS ilim FAULT olpt COM GPROTECT FSW={FSW} VG={VG} UVLO={UVLO} TEN={TEN} TSS={TSS} SSMODE={SSMODE} SSFRAC={SSFRAC} CS_LIM={CS_LIM} SCMODE={SCMODE} SCP={SCP} SCPBLANK={SCPBLANK} OLPEN={OLPEN} TOLP={TOLP} THOLD={THOLD} TOFF={TOFF} TBLANK={TBLANK}
+Berror error COM V={VSET}*if({SSMODE}==0,V(SS,COM),1)-V(FB,COM)
+Xcomp error active command COM GCOMP TYPE={TYPE} KP={KP} FZ1={FZ1} FP1={FP1} FZ2={FZ2} FP2={FP2} CMAX={CMAX}
+Bcomp COMP COM V={COFF}+min(V(command,COM),if(({SSMODE}==2)&(V(SS,COM)<0.99999),max(0,{SSCLO}+({SSCHI}-{SSCLO})*V(SS,COM)-{COFF}),{CMAX}))
+Xcore COMP cs_filtered active VCC GATE RAMP ilim COM GPWM_CORE2 FSW={FSW} MODE={MODE} DMAX={DMAX} VM={VM} A_CS={A_CS} SLOPE={SLOPE} TBLANK={TBLANK} TONMIN={TONMIN} TPROP={TPROP} VG={VG} RDRV={RDRV} UVLO={UVLO} COFF={COFF}
+.ends GFLY_CTRL2
+
+* Visible power-stage building blocks. ACT=0 bypasses a diode with 1 uOhm.
+.subckt GPWR_DIODE A K params: VF=0.7 ACT=1 CJ=20e-12
+Dmain A K DM
+.model DM D(Ron=0.001 Roff=1e10 Vfwd={VF})
+Rbypass A K {if(ACT>0.5,1e12,1e-6)}
+Cj A K {CJ} Rser=0.1 m={ACT}
+.ends GPWR_DIODE
+.subckt GPWR_CAP P N params: C=100e-6 ESR=0.02 ESL=0 ACT=1
+Cmain P N {C} Rser={ESR} Lser={ESL} Rpar=1e12 m={ACT}
+Rnum P N 1e12
+.ends GPWR_CAP
+.subckt GPWR_MOS D G S params: RON=0.05 COSS=200e-12 CG=1e-9 VG=10 CJ=20e-12
+Smain D S G S MSW
+.model MSW SW(Ron={RON} Roff=1e9 Vt={VG/2} Vh={-VG*0.2})
+Coss D S {COSS}
+Cgate G S {CG}
+Xbody S D GPWR_DIODE VF=0.8 CJ={CJ}
+.ends GPWR_MOS
+.subckt GPWR_FEEDBACK O1 O2 O3 O4 O5 O6 SG FB COM params: SEL=1 H=1
+Bfb FB COM V={H}*if({SEL}==1,V(O1,SG),if({SEL}==2,V(O2,SG),if({SEL}==3,V(O3,SG),if({SEL}==4,V(O4,SG),if({SEL}==5,V(O5,SG),V(O6,SG))))))
+.ends GPWR_FEEDBACK

@@ -1,0 +1,69 @@
+# build artifacts / large outputs
+dist/
+releases/
+archive/
+user_data/
+output/
+build/
+artifacts/
+.venv/
+.venv-web/
+web_app/static/
+web_app/pcs_native_static/
+output/playwright/
+.playwright-cli/
+.pytest_cache/
+.mypy_cache/
+__pycache__/
+*.pyc
+node_modules/
+package-lock.json
+package.json
+!web_app/frontend/package.json
+!web_app/frontend/package-lock.json
+
+# scratch / temp
+_pdftxt/
+_tmp*
+*.tmp
+
+# misc binaries not needed in VCS
+*.zip
+*.mov
+
+# OS junk
+Thumbs.db
+.DS_Store
+参考资料/fundamentals of power electronics.pdf
+
+# Local editor/agent settings, credentials and private data
+/.vscode/
+/.zcode/
+/.codex/
+/.agents/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Separate projects, external deployment and references stay local
+/related_projects/
+/integrations/
+/参考资料/
+web_app/pcs_static/
+
+# Organization-specific integration notes, deployment and acceptance scripts
+/desktop_host/
+/docs/PCS_*.md
+/tests/pcs_*
+/tools/*pcs*
+/tools/build_native_notices.py
+/tools/promote_studio.ps1
+/tools/organize_workspace.ps1
+/tools/diagnose_current_loop.py
+/tools/qa_parallel_esr_loop.py
+/tools/finalize_spice_v3_evidence.py
+/docs/HARDWARE_WORKFLOW.md
+/docs/WORKSPACE_CLEANUP.md
+/packaging/STUDIO_README.txt

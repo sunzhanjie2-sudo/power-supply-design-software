@@ -1,0 +1,31 @@
+{
+  "name": "power-design-local-web",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit && vite build",
+    "check": "vue-tsc --noEmit",
+    "build:pcs-native": "vue-tsc --noEmit && vite build --config vite.pcs-native.config.ts"
+  },
+  "dependencies": {
+    "docx": "9.5.1",
+    "exceljs": "4.4.0",
+    "fflate": "0.8.3",
+    "ml-matrix": "6.15.1",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vue-tsc": "3.1.1"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
+}

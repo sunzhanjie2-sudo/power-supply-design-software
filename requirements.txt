@@ -1,0 +1,8 @@
+# Runtime used for the 2026-10-22 service-layer regression (Python 3.13, Windows).
+# Core/desktop runtime. Web and build dependencies are in their own requirements files.
+numpy==2.3.2
+scipy==1.16.1
+control==0.10.2
+matplotlib==3.10.5
+python-docx==1.2.0
+openpyxl==3.1.5

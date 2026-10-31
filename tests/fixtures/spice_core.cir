@@ -1,0 +1,17 @@
+Generic PWM core regression bench -- independent of flyback power stage
+.include GenericFlybackPWM.lib
+.param FTEST=100e3 DUTY=0.35 RUNMODE=0 CSLIMIT=0.9 SLOPETEST=0
+Vcc vcc 0 12
+Ven en 0 PULSE(0 1 1e-6 2e-9 2e-9 350e-6 1e-3)
+Vcomp comp 0 {DUTY}
+* PCM bench: CS ramp is 100000 V/s, so duty equals command with gain=1.
+Bcs cs 0 V=(time*{FTEST}-floor(time*{FTEST}))
+Xctrl comp cs en vcc gate ramp 0 GPWM_CORE FSW={FTEST} MODE={RUNMODE} DMAX=0.7 VM=1 A_CS=1 CS_LIM={CSLIMIT} SLOPE={SLOPETEST} TBLANK=50e-9 TONMIN=50e-9 TPROP=10e-9
+Cgate gate 0 1e-9
+.tran 0 400e-6 0 100e-9
+.options plotwinsize=0
+.save V(gate) V(ramp) V(en) V(cs)
+.meas tran gate_avg AVG V(gate) FROM 100e-6 TO 300e-6
+.meas tran disabled_max MAX V(gate) FROM 360e-6 TO 390e-6
+.meas tran period TRIG V(gate) VAL=5 RISE=10 TARG V(gate) VAL=5 RISE=11
+.end

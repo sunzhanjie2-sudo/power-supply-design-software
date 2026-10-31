@@ -1,0 +1,18 @@
+Version 4
+SymbolType CELL
+LINE Normal 0 0 32 0
+LINE Normal 32 -20 32 20
+LINE Normal 32 -20 64 0
+LINE Normal 32 20 64 0
+LINE Normal 64 -20 64 20
+LINE Normal 64 0 96 0
+WINDOW 0 48 -32 Bottom 2
+SYMATTR Prefix X
+SYMATTR Value GPWR_DIODE
+SYMATTR ModelFile GenericFlybackPWM.lib
+PIN 0 0 NONE 0
+PINATTR PinName A
+PINATTR SpiceOrder 1
+PIN 96 0 NONE 0
+PINATTR PinName K
+PINATTR SpiceOrder 2

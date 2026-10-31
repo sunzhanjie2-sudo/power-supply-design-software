@@ -1,0 +1,3 @@
+-r requirements.txt
+# Optional AI tool-chain transport; not needed to run the desktop calculator.
+mcp==1.30.0

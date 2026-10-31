@@ -1,0 +1,19 @@
+QR controller event and fault bench
+.include GenericFlybackPWM.lib
+.include GenericQR_L6565.lib
+VEN en 0 1
+VCC vcc 0 PWL(0 15 1.2m 15 1.21m 5 1.4m 5 1.41m 15)
+BAGE age 0 V=idt(1,0,V(gate)>5)
+BZCD zcd 0 V=if(V(gate)>5,.65,if(V(age)<6u,5.2,.65))
+BCS cs 0 V=if(time>1m & time<1.3m,3,idt(if(V(gate)>5,150k,0),0,V(gate)<5))
+XU fb cs en vcc gate comp ramp ss fault 0 zcd GQR_CTRL VSET=60 KP=100 TSS=100u TSTART=40u TPROP=100n CS_TAU=20n
+VFB fb 0 0
+Cgate gate 0 1n
+.tran 0 2m 0 20n
+.save V(gate) V(fault) V(vcc) V(cs) V(zcd)
+.meas tran active_gate MAX V(gate) FROM .5m TO .9m
+.meas tran fault_latched MIN V(fault) FROM 1.05m TO 1.19m
+.meas tran gate_locked MAX V(gate) FROM 1.05m TO 1.19m
+.meas tran fault_reset MAX V(fault) FROM 1.3m TO 1.39m
+.meas tran gate_restart MAX V(gate) FROM 1.8m TO 2m
+.end
