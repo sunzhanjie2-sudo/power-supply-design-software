@@ -15,8 +15,10 @@ class IsolatedUI(CrossRegulationUI,OutputParameterPanel):
         from main import resource_path
         from pathlib import Path
         try:
-            cfg=json.loads(Path(resource_path('examples/'+filename)).read_text(encoding='utf-8'))
+            raw=Path(resource_path('examples/'+filename)).read_bytes()
+            cfg=json.loads(raw.decode('utf-8-sig'))
             self._apply_config(dict(DEFAULT_PARAMS,**cfg))
+            self._geometry_source=(filename,raw)
             self.request_update()
         except Exception as exc: messagebox.showerror('隔离输出示例',str(exc))
 
@@ -57,7 +59,7 @@ class IsolatedUI(CrossRegulationUI,OutputParameterPanel):
         coupling=copy.deepcopy(candidate.get('coupling_config',default_coupling_config(len(rails) or 1)))
         # Validate the complete saved matrix before touching any existing UI
         # state. Unsupported topology drafts remain disabled in calculation.
-        if isinstance(coupling,dict) and coupling.get('enabled') and candidate['topology']=='FLYBACK' and candidate.get('feedback_mode','SSR')=='SSR':
+        if isinstance(coupling,dict) and coupling.get('enabled') and candidate['topology'] in ('FLYBACK','QR-FLYBACK') and candidate.get('feedback_mode','SSR')=='SSR':
             resolve_winding_model(dict(candidate,coupling_config=coupling),rails)
         else:
             validate_coupling_config(coupling,len(rails) or 1)
@@ -105,7 +107,7 @@ class IsolatedUI(CrossRegulationUI,OutputParameterPanel):
         diagram,results,psr=self._isolated_result_pages
         allowed=((diagram,True),(results,self._inline_multiple_active() or (self._coupling_supported() and self.coupling_enabled.get())),
                  (psr,self._topo_key()=='FLYBACK' and self.feedback_mode.get()=='PSR-MP6005'),
-                 (self._cross_page,self._inline_multiple_active() and self._topo_key()=='FLYBACK' and self.feedback_mode.get()=='SSR'))
+                 (self._cross_page,self._inline_multiple_active() and self._topo_key() in ('FLYBACK','QR-FLYBACK','ACF-FORWARD') and self._effective_feedback_mode()=='SSR'))
         selected=book.select()
         if any(str(page)==selected and not show for page,show in allowed):
             book.select(diagram)
@@ -151,8 +153,10 @@ class IsolatedUI(CrossRegulationUI,OutputParameterPanel):
             note=('绕组耦合矩阵实验模型：按实际匝数 / 自感、两两 kij、DCR、整流器和有限电压钳位求周期稳态。'
                   '\n★主反馈路目标稳压；其余路先按实际匝比估算电压，再以 R=V匝比²/P额定建立固定电阻负载；求解电压 / 功率单列。'
                   '支路 CCM/DCM 按副边能量传递期间是否提前截止判定；原边导通期间的正常零电流不计作 DCM。'
-                  '\n输出电容采用恒定直流电压 / 周期平均电荷平衡；大纹波需复核。适用固定频率 SSR 反激；'
+                  '\n输出电容采用恒定直流电压 / 周期平均电荷平衡；大纹波需复核。'
                   '不含绕组分布电容 / 高频谐振完整模型，需仿真与实测复核。')
+            if p['topology']=='QR-FLYBACK':
+                note+='\nQR：周期随输入及负载改变，由导通、矩阵退磁和允许谷底共同决定；谷底采用恒C时序近似。频率及各路电流来自该角点解，环路仍须按其已声明的低频约化范围复核。'
         elif coupling.get('ideal_fallback'):
             note=('全部 kij=1：使用理想变压器极限。零漏感下的多绕组电流分配可能不唯一，当前仍采用标称功率比例分配；'
                   '不将该分配解释为真实交叉调整率求解。原边、磁芯、输入电容只计一次。')

@@ -13,6 +13,22 @@ def check(folder):
     desktop=(folder/'SwitchingPowerSupplyDesign_V0.exe').is_file()
     archive=CArchiveReader(str(folder/('SwitchingPowerSupplyDesign_V0.exe' if desktop else 'PowerDesignWeb.exe')))
     pyz=archive.open_embedded_archive('PYZ.pyz')
+    names = ['design_engine.initial_design','design_engine.sizing_basis','design_engine.boost_sizing',
+             'design_engine.flyback_sizing','design_engine.preferred_values','coupled_flyback','cross_regulation','plants',
+             'winding_layout','parallel_wires','winding_positions','winding_report','transformer_gap','transformer_geometry','transformer_geometry_contract','magnetic_report_view']
+    if desktop: names.extend(['winding_ui','winding_drag_ui','geometry_ui','magnetic_report_ui',
+        'joint_simulation','joint_simulation_ui','joint_simulation_report',
+        'transformer_simulation','transformer_sim_runner','transformer_sim_ui','transformer_sim_reference','transformer_field_reuse',
+        'winding_coupling'])
+    names.append('initial_design_ui' if desktop else 'web_app.server')
+    for name in names:
+        source=ROOT/(name.replace('.','/')+'.py')
+        assert normalized(pyz.extract(name))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),name+' stale'
+    from app_resources import resource_path
+    assert resource_path('自动计算参数依据.docx').read_bytes()==(folder/'_internal'/'自动计算参数依据.docx').read_bytes()
+    for name in ('spice_planning','spice_result_cache','flyback_cap_boundary','inductor_selection','magnetics','parameter_layout','analysis_workflows','input_range_report'):
+        source=ROOT/(name+'.py')
+        assert normalized(pyz.extract(name))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),name+' stale'
     for name in ('loss_model','nonisolated','nonisolated_spice','parasitics','parasitic_ringing','parasitic_spice','parasitic_report','example_catalog','comp_design','compensation_report','voltage_nodes','coupled_flyback','multi_output_loop','output_capacitors','loop_report','word_math','transformer_turns','spice_export','spice_circuit','spice_runtime','spice_studies','spice_analysis','spice_comparison_report','power_stage','design_engine.specification','controller_logic','qr_spice_export','qr_spice_settings','qr_spice_analysis','qr_loop','acf_spice','acf_cross','acf_periodic','acf_loop')+ (('parasitic_ui','spice_ui','spice_logic_ui') if desktop else ('web_app.worker','web_app.metadata','web_app.server','web_app.actions')):
         source=ROOT/(name.replace('.','/')+'.py')
         assert normalized(pyz.extract(name))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),name+' stale'
@@ -21,14 +37,16 @@ def check(folder):
         assert normalized(pyz.extract(name))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),name+' stale'
     if desktop:
         source=ROOT/'main.py'
-        assert normalized(marshal.loads(archive.extract('main')))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),'desktop menu stale'
+        assert normalized(pyz.extract('main'))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),'desktop menu stale'
+        source=ROOT/'desktop_entry.py'
+        assert normalized(marshal.loads(archive.extract('desktop_entry')))==normalized(compile(source.read_text(encoding='utf-8-sig'),str(source),'exec')),'desktop entry stale'
     for relative in ('resources/spice/GenericFlybackPWM.lib','resources/spice/GPWM_CORE.asy',
         'resources/spice/GFLY_CTRL2.asy','docs/FLYBACK_SPICE.md','resources/spice/GenericQR_L6565.lib',
         'resources/spice/GQR_CTRL.asy','resources/spice/QR_ZCD.asy','resources/spice/QR_Flyback_1.asc',
         'resources/spice/QR_Flyback_1.plt','docs/QR_L6565_SPICE.md','docs/QR_TYPE2_COMPENSATION.md','examples/90W_QR_L6565_300V.json',
         'examples/90W_QR_L6565_300V_TUNED.json','resources/spice/GenericACF_MP6005.lib',
         'resources/spice/GACF_CTRL.asy','resources/spice/PowerPmos.asy','resources/spice/PowerChoke.asy',
-        'docs/ACF_MP6005_SPICE.md','docs/ACF_PERIODIC_MODEL.md','docs/PARASITIC_MODELS.md','docs/BUILTIN_EXAMPLES.md',
+        'docs/ACF_MP6005_SPICE.md','docs/ACF_PERIODIC_MODEL.md','docs/PARASITIC_MODELS.md','docs/BUILTIN_EXAMPLES.md','docs/PURCHASED_INDUCTORS.md',
         'examples/33W_3OUT_ACF_MP6005.json','examples/33W_3OUT_ACF_MP6005_COMPACT.json',
         'examples/40W_CCM_3OUT_FLYBACK.json')+tuple(f'resources/spice/Flyback_{i}.asc' for i in range(1,7))+tuple(f'resources/spice/ACF_Forward_{i}.asc' for i in range(1,7)):
         assert (ROOT/relative).read_bytes()==(folder/'_internal'/relative).read_bytes(),relative+' stale'

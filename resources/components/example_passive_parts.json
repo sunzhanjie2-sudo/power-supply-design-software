@@ -1,0 +1,778 @@
+{
+  "schema": "power-design.example-passive-candidates.v1",
+  "date": "2026-11-08",
+  "scope": "仅原厂资料核实的候选库；root统一应用示例。本脚本不更改示例或求解公式。",
+  "notes": [
+    "电解的阻抗上限不是独立ESR；当前模型用其作保守电阻代理，ESL单独标假设。",
+    "薄膜纹波额定不可跨温度/频率无条件照搬。缺项用null，不能造0或自动判通过。",
+    "电阻平均功耗使用额定20%；脉冲、温度、体积、寿命与装配验证仍需另核。",
+    "RCD的R/C随软件设计派生，候选型号数值不匹配时必须明确，不能悄改既定硬件。"
+  ],
+  "parts": {
+    "EEUFR1H331L": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1H331L",
+      "package": "Radial Ø10×25 mm; pitch 5 mm",
+      "capacitance_F": 0.00033,
+      "voltage_V": 50,
+      "ripple_A": 2.15,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00033,
+        "ESR": 0.022,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1H331L",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第6页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1H221": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1H221",
+      "package": "Radial Ø10×16 mm; pitch 5 mm",
+      "capacitance_F": 0.00021999999999999998,
+      "voltage_V": 50,
+      "ripple_A": 1.65,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00021999999999999998,
+        "ESR": 0.03,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1H221",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第6页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。该官网型号页把0.030 Ω错误标为0.03 mΩ；此处按系列PDF第6页0.030 Ω。"
+    },
+    "EEUFR1V221": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1V221",
+      "package": "Radial Ø8×11.5 mm; pitch 3.5 mm",
+      "capacitance_F": 0.00021999999999999998,
+      "voltage_V": 35,
+      "ripple_A": 0.95,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00021999999999999998,
+        "ESR": 0.056,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1V221",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1E471": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1E471",
+      "package": "Radial Ø10×12.5 mm; pitch 5 mm",
+      "capacitance_F": 0.00047,
+      "voltage_V": 25,
+      "ripple_A": 1.29,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00047,
+        "ESR": 0.043,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1E471",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1V471": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1V471",
+      "package": "Radial Ø10×16 mm; pitch 5 mm",
+      "capacitance_F": 0.00047,
+      "voltage_V": 35,
+      "ripple_A": 1.79,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00047,
+        "ESR": 0.028,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1V471",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1H471": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1H471",
+      "package": "Radial Ø12.5×20 mm; pitch 5 mm",
+      "capacitance_F": 0.00047,
+      "voltage_V": 50,
+      "ripple_A": 2.26,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00047,
+        "ESR": 0.022,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1H471",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第6页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFS2A221": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFS2A221",
+      "package": "Radial Ø12.5×25 mm; pitch 5 mm",
+      "capacitance_F": 0.00021999999999999998,
+      "voltage_V": 100,
+      "ripple_A": 1.8,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 0.00021999999999999998,
+        "ESR": 0.034,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFS2A221",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1255.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1H101": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1H101",
+      "package": "Radial Ø8×11.5 mm; pitch 3.5 mm",
+      "capacitance_F": 9.999999999999999e-05,
+      "voltage_V": 50,
+      "ripple_A": 0.87,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 9.999999999999999e-05,
+        "ESR": 0.061,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1H101",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第6页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1V101": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1V101",
+      "package": "Radial Ø8×11.5 mm; pitch 3.5 mm",
+      "capacitance_F": 9.999999999999999e-05,
+      "voltage_V": 35,
+      "ripple_A": 0.95,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 9.999999999999999e-05,
+        "ESR": 0.056,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1V101",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "EEUFR1E101": {
+      "kind": "capacitor",
+      "manufacturer": "Panasonic",
+      "model": "EEUFR1E101",
+      "package": "Radial Ø6.3×11.2 mm; pitch 2.5 mm",
+      "capacitance_F": 9.999999999999999e-05,
+      "voltage_V": 25,
+      "ripple_A": 0.455,
+      "capacitor_type": "electrolytic",
+      "calculation": {
+        "C": 9.999999999999999e-05,
+        "ESR": 0.13,
+        "ESL": 5e-09
+      },
+      "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer impedance upper bound used as resistive proxy",
+        "ESL": "engineering placeholder, not manufacturer value",
+        "ripple": "manufacturer 100 kHz/+105°C"
+      },
+      "sources": [
+        {
+          "url": "https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFR1E101",
+          "location": "Specification: rated voltage/capacitance/ripple/impedance/package"
+        },
+        {
+          "url": "https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1259.pdf",
+          "location": "印刷PDF第5页型号行；第3页脚注定义条件"
+        }
+      ],
+      "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。"
+    },
+    "B32774D4106K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32774D4106K000",
+      "package": "Radial boxed 31.5×15×24.5 mm; pitch 27.5 mm",
+      "capacitance_F": 1e-05,
+      "voltage_V": 450,
+      "ripple_A": 8.0,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 1e-05,
+        "ESR": 0.0109,
+        "ESL": 2.4e-08
+      },
+      "conditions": "IRMS max 8A，70°C/10kHz，ΔT≤20°C；ESR典型10.9mΩ，70°C/10kHz；ESL典型24nH，谐振频率处。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "manufacturer typical",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://www.tdk-electronics.tdk.com/inf/20/20/db/fc_2009/MKP_B32774_778.pdf",
+          "location": "2026-06版印刷第7页450V/10µF行及脚注"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/dc-link/info?part_no=B32774D4106K000",
+          "location": "manufacturer part page"
+        }
+      ],
+      "note": "10µF/450V输入可用；若用作低压输出旁路体积明显过配。额定纹波不能视为任意频率和温度下的能力。"
+    },
+    "B32522C0106K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32522C0106K000",
+      "package": "Radial boxed 18×9×17.5 mm; pitch 15 mm",
+      "capacitance_F": 1e-05,
+      "voltage_V": 63,
+      "ripple_A": null,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 1e-05,
+        "ESR": 0.03,
+        "ESL": 1e-08
+      },
+      "conditions": "10µF±10%，63VDC/40VAC，额定电压上升率30V/µs；原厂该型号页未列RMS纹波、ESR或ESL。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "engineering placeholder",
+        "ESL": "engineering placeholder",
+        "ripple": "unknown"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/rfi_general/info?part_no=B32522C0106K000",
+          "location": "Electrical Characteristics/Size"
+        },
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkt/data_sheet/20/20/db/fc_2009/b32520_529.pdf",
+          "location": "B32522 ordering table, 63V/10µF"
+        }
+      ],
+      "note": "适合低压口10µF真实容量候选。RMS纹波能力保持未知，不作自动通过；30mΩ ESR和10nH ESL仅工程占位，须实测或频率损耗曲线复核。"
+    },
+    "B32652A6473K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32652A6473K000",
+      "package": "Radial MKP boxed 18×5×10.5 mm; pitch 15 mm",
+      "capacitance_F": 4.7000000000000004e-08,
+      "voltage_V": 630,
+      "ripple_A": 2.4,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 4.7000000000000004e-08,
+        "ESR": 0.0354,
+        "ESL": 1e-08
+      },
+      "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "engineering placeholder",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf",
+          "location": "2025-05版印刷第13页(630V)/14-15页(1600V)对应容量行"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652A6473K000",
+          "location": "manufacturer part identity/voltage/capacitance"
+        }
+      ],
+      "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。"
+    },
+    "B32652A6104K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32652A6104K000",
+      "package": "Radial MKP boxed 18×7×12.5 mm; pitch 15 mm",
+      "capacitance_F": 1.0000000000000001e-07,
+      "voltage_V": 630,
+      "ripple_A": 4.0,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 1.0000000000000001e-07,
+        "ESR": 0.0172,
+        "ESL": 1e-08
+      },
+      "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "engineering placeholder",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf",
+          "location": "2025-05版印刷第13页(630V)/14-15页(1600V)对应容量行"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652A6104K000",
+          "location": "manufacturer part identity/voltage/capacitance"
+        }
+      ],
+      "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。"
+    },
+    "B32652A1332J000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32652A1332J000",
+      "package": "Radial MKP boxed 18×5×10.5 mm; pitch 15 mm",
+      "capacitance_F": 3.3e-09,
+      "voltage_V": 1600,
+      "ripple_A": 0.9,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 3.3e-09,
+        "ESR": 0.2066,
+        "ESL": 1e-08
+      },
+      "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "engineering placeholder",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf",
+          "location": "2025-05版印刷第13页(630V)/14-15页(1600V)对应容量行"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652A1332J000",
+          "location": "manufacturer part identity/voltage/capacitance"
+        }
+      ],
+      "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。"
+    },
+    "B32652J1222K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32652J1222K000",
+      "package": "Radial MKP boxed 18×5×10.5 mm; pitch 15 mm",
+      "capacitance_F": 2.2000000000000003e-09,
+      "voltage_V": 1600,
+      "ripple_A": 0.7,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 2.2000000000000003e-09,
+        "ESR": 0.2695,
+        "ESL": 1e-08
+      },
+      "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "engineering placeholder",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf",
+          "location": "2025-05版印刷第13页(630V)/14-15页(1600V)对应容量行"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652J1222K000",
+          "location": "manufacturer part identity/voltage/capacitance"
+        }
+      ],
+      "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。"
+    },
+    "B32652A1472K000": {
+      "kind": "capacitor",
+      "manufacturer": "TDK",
+      "model": "B32652A1472K000",
+      "package": "Radial MKP boxed 18×6×11 mm; pitch 15 mm",
+      "capacitance_F": 4.700000000000001e-09,
+      "voltage_V": 1600,
+      "ripple_A": 1.4,
+      "capacitor_type": "film",
+      "calculation": {
+        "C": 4.700000000000001e-09,
+        "ESR": 0.1453,
+        "ESL": 1e-08
+      },
+      "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+      "parameter_provenance": {
+        "C": "manufacturer nominal",
+        "ESR": "manufacturer typical",
+        "ESL": "engineering placeholder",
+        "ripple": "manufacturer condition-specific maximum"
+      },
+      "sources": [
+        {
+          "url": "https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf",
+          "location": "2025-05版印刷第13页(630V)/14-15页(1600V)对应容量行"
+        },
+        {
+          "url": "https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652A1472K000",
+          "location": "manufacturer part identity/voltage/capacitance"
+        }
+      ],
+      "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。"
+    },
+    "WSLP2010R0150FEA": {
+      "kind": "resistor",
+      "manufacturer": "Vishay Dale",
+      "model": "WSLP2010R0150FEA",
+      "package": "SMD 2010 metal strip",
+      "resistance_ohm": 0.015,
+      "power_W": 2.0,
+      "conditions": "P70=2W，需遵循厂家焊盘、热设计及高温降额；1%容差；低电感金属条。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/30122/wslp.pdf",
+          "location": "第1页额定功率/范围及型号编码；后续热降额/脉冲曲线"
+        }
+      ],
+      "note": "按20%规则允许平均0.4W；仍需脉冲、焊盘温升及布局校验。特别注意WSLP2512范围只到10mΩ，不能换成同阻值WSLP2512。",
+      "allowed_average_power_at_20pct_W": 0.4
+    },
+    "WSLP2010R0200FEA": {
+      "kind": "resistor",
+      "manufacturer": "Vishay Dale",
+      "model": "WSLP2010R0200FEA",
+      "package": "SMD 2010 metal strip",
+      "resistance_ohm": 0.02,
+      "power_W": 2.0,
+      "conditions": "P70=2W，需遵循厂家焊盘、热设计及高温降额；1%容差；低电感金属条。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/30122/wslp.pdf",
+          "location": "第1页额定功率/范围及型号编码；后续热降额/脉冲曲线"
+        }
+      ],
+      "note": "按20%规则允许平均0.4W；仍需脉冲、焊盘温升及布局校验。特别注意WSLP2512范围只到10mΩ，不能换成同阻值WSLP2512。",
+      "allowed_average_power_at_20pct_W": 0.4
+    },
+    "WFMA2512R0150FEA": {
+      "kind": "resistor",
+      "manufacturer": "Vishay Dale",
+      "model": "WFMA2512R0150FEA",
+      "package": "SMD 2512 metal plate",
+      "resistance_ohm": 0.015,
+      "power_W": 3.0,
+      "conditions": "本库采用3W@端子95°C额定；原厂亦给4W@端子70°C，不当作环境温度额定。1%容差。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/30387/wfm.pdf",
+          "location": "第1页额定功率/端子温度脚注、阻值范围与订货编码，第3页端子温度降额"
+        }
+      ],
+      "note": "20%允许平均0.6W；必须核对焊盘铜皮与端子温度。第3页脉冲统计仅对33mΩ有效，其余阻值需独立测试，不能无条件套用。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "WFMA2512R0200FEA": {
+      "kind": "resistor",
+      "manufacturer": "Vishay Dale",
+      "model": "WFMA2512R0200FEA",
+      "package": "SMD 2512 metal plate",
+      "resistance_ohm": 0.02,
+      "power_W": 3.0,
+      "conditions": "本库采用3W@端子95°C额定；原厂亦给4W@端子70°C，不当作环境温度额定。1%容差。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/30387/wfm.pdf",
+          "location": "第1页额定功率/端子温度脚注、阻值范围与订货编码，第3页端子温度降额"
+        }
+      ],
+      "note": "20%允许平均0.6W；必须核对焊盘铜皮与端子温度。第3页脉冲统计仅对33mΩ有效，其余阻值需独立测试，不能无条件套用。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "WFMB2512R0500FEA": {
+      "kind": "resistor",
+      "manufacturer": "Vishay Dale",
+      "model": "WFMB2512R0500FEA",
+      "package": "SMD 2512 metal plate",
+      "resistance_ohm": 0.05,
+      "power_W": 3.0,
+      "conditions": "本库采用3W@端子95°C额定；原厂亦给4W@端子70°C，不当作环境温度额定。1%容差。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/30387/wfm.pdf",
+          "location": "第1页额定功率/端子温度脚注、阻值范围与订货编码，第3页端子温度降额"
+        }
+      ],
+      "note": "20%允许平均0.6W；必须核对焊盘铜皮与端子温度。第3页脉冲统计仅对33mΩ有效，其余阻值需独立测试，不能无条件套用。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PWR221T-30-R330F": {
+      "kind": "resistor",
+      "manufacturer": "Bourns",
+      "model": "PWR221T-30-R330F",
+      "package": "TO-220-2 insulated power resistor",
+      "resistance_ohm": 0.33,
+      "power_W": 2.25,
+      "conditions": "25°C自由空气额定2.25W（无散热器）；30W只适用于壳温25°C/指定散热器，当前不采用30W。1%容差。",
+      "sources": [
+        {
+          "url": "https://www.bourns.com/docs/product-datasheets/pwr221t-30.pdf",
+          "location": "第1页功率脚注、R330阻值表及第2页订货格式"
+        }
+      ],
+      "note": "20%允许平均0.45W；引脚/本体最大电感0.1µH，需要独立检查高频采样误差。",
+      "allowed_average_power_at_20pct_W": 0.45
+    },
+    "PR03000201803JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000201803JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 18000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PR03000202203JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000202203JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 22000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PR03000203303JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000203303JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 33000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PR03000204703JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000204703JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 47000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PR03000206803JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000206803JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 68000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    },
+    "PR03000201004JAC00": {
+      "kind": "resistor",
+      "manufacturer": "Vishay BCcomponents",
+      "model": "PR03000201004JAC00",
+      "package": "Axial DIN0617 Cu-lead",
+      "resistance_ohm": 100000,
+      "power_W": 3.0,
+      "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+      "sources": [
+        {
+          "url": "https://www.vishay.com/docs/28729/pr010203.pdf",
+          "location": "第1页额定值/材料差别，第3页订货体系：引线编码2=Cu0.78mm，后续脉冲曲线"
+        }
+      ],
+      "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。",
+      "allowed_average_power_at_20pct_W": 0.6000000000000001
+    }
+  }
+}

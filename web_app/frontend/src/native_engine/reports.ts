@@ -274,7 +274,15 @@ const modules: Module[] = [
     name: "磁件与绕组",
     rows: (c) =>
       c.display.magnetics.flatMap((dev: Spec) => [
-        [dev.kind + " 磁芯", dev.core, ""],
+        [dev.kind + " 磁芯", dev.core_label || dev.core, ""],
+        ...(dev.design_enabled === false
+          ? [
+              ["成品电感 / L", dev.L, "H"],
+              ["成品电感 / DCR", dev.R_dc, "Ω"],
+              ["成品电感 / 附加损耗", dev.P_extra, "W"],
+              ["模型说明", dev.note, ""],
+            ] as Row[]
+          : []),
         ...entries(dev, [
           "Ae",
           "Ve",
@@ -396,6 +404,7 @@ const modules: Module[] = [
           [r.manufacturer, r.model, r.package].filter(Boolean).join(" / ") ||
             "资料待填",
           "",
+          [r.conditions, r.note].filter(Boolean).join("；"),
         ],
         ...r.checks.map(
           (k: Spec) =>

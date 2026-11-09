@@ -123,7 +123,7 @@ function field(key: string): Parameter {
           ><strong>{{ fmt(preview?.outputs?.[index]?.V_out, "V") }}</strong>
         </div>
         <FieldInput
-          v-for="key in ['P_out', 'P_out_min', 'Ns', 'd_wire_s', 'n_strand_s']"
+          v-for="key in ['P_out', 'P_out_min', 'Ns', 'd_wire_s', 'n_strand_s','parallel_wires_s']"
           :key="key"
           :field="field(key)"
           :value="rail[key]"

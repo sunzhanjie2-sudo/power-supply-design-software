@@ -220,7 +220,30 @@ def export_input_range_xlsx(path, range_result, *, compensation_state=None,
         from mos_manual import distinct_endpoints
         common += '上下限相同，但手动 MOS 事件参数不同，分别核算。' if distinct_endpoints(range_result['base_spec']) else '上下限相同，两端结果一致。'
     if len(details) != 2: common += '存在失败工况，不以另一端点替代。'
-    sheets = []
+    # Acceptance consumes the same completed snapshot as Word; it neither
+    # launches simulations nor treats missing measurements as zero.
+    from report_architecture import acceptance_snapshot, acceptance_rows
+    acceptance=acceptance_snapshot(range_result['base_spec'],range_result)
+    acceptance_sheet=Sheet('00 工程验收')
+    _headers(acceptance_sheet,cases,common)
+    summary=acceptance.get('summary') or {}
+    acceptance_sheet.span(5,0,17,'当前结论：'+str(summary.get('label','待评估'))+
+        '；仅覆盖已配置目标和证据来源，不等同整机认证。'+
+        '；'.join(case['id']+' 计算失败：'+str(case.get('error') or '无结果')
+                  for case in cases if case.get('error') or not case.get('result')),7)
+    acceptance_sheet.heights[5]=36
+    rows=acceptance_rows(acceptance)
+    used=0
+    for side in (0,1):
+        used=max(used,_write_block(acceptance_sheet,7,side*9,dict(kind='table',
+            rows=[['验收指标','需求阈值','证据与结论'],
+                  *[[row[0],row[1],row[2+side]] for row in rows]]),cases[side]['id']))
+    row=8+used
+    for note in acceptance.get('evidence_notes') or []:
+        acceptance_sheet.span(row,0,17,str(note),7)
+        acceptance_sheet.heights[row]=max(30,fitted_height(note,sum(WIDTHS)))
+        row+=2
+    sheets = [acceptance_sheet]
     for module, name in MODULES.items():
         left,right = content[0][module],content[1][module]
         if module != 'overview' and not left and not right: continue
@@ -288,6 +311,7 @@ def export_input_range_xlsx(path, range_result, *, compensation_state=None,
     return dict(path=str(path),case_count=2,successful_cases=2-len(failed),failed_cases=failed,
                 incomplete=bool(failed) or not fixed or cross_incomplete,hardware_fixed=fixed,
                 cross_regulation_complete=cross.get('complete') if cross else None,
+                acceptance_summary=acceptance.get('summary'),
                 sheet_count=len(sheets),sheet_names=[sheet.name for sheet in sheets],
                 figure_count=sum(len(sheet.images) for sheet in sheets),
                 check_count=sum(detail['checks'] for detail in details))

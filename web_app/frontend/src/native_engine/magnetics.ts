@@ -1,5 +1,6 @@
 import { reference, type Spec, roundEven } from "./spec";
 import { gamma } from "./math";
+import { purchased, purchasedInductor } from "./inductor_selection";
 export function core(p: Spec, ap: number, fixed: Spec = {}) {
   const choice = fixed.core || p.core_choice;
   let geometry = fixed.core_geometry || reference.cores[choice];
@@ -140,6 +141,7 @@ export function transformer(op: Spec, p: Spec) {
   };
 }
 export function inductor(op: Spec, p: Spec) {
+  if (purchased(p)) return purchasedInductor(op, p);
   const fixed = p._fixed_inductor || {},
     ap = (op.L * op.I_L_pk * op.I_L_rms) / (p.Bmax * p.J * p.Ku),
     c = core(p, ap, fixed),

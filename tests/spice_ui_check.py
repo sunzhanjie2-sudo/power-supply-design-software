@@ -25,6 +25,28 @@ def descendants(widget):
 
 
 class SpiceUICheck(unittest.TestCase):
+    def test_quick_plan_is_explicit_and_preserves_controller(self):
+        import json
+        from design_engine.specification import load_spec
+        root=tk.Tk();root.withdraw()
+        try:
+            p=load_spec(json.loads((ROOT/'examples/40W_CCM_3OUT_FLYBACK.json').read_text(encoding='utf-8')))
+            applied=[]
+            open_export_dialog(root,p,applied.append)
+            dialog=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
+            buttons=[w for w in descendants(dialog) if isinstance(w,ttk.Button)]
+            next(w for w in buttons if w.cget('text')=='快速预检（推荐）').invoke()
+            next(w for w in buttons if w.cget('text')=='应用到计算器').invoke()
+            self.assertEqual(applied[-1]['fra_enabled'],0)
+            self.assertEqual(applied[-1]['cross_enabled'],0)
+            self.assertEqual(applied[-1]['step_ms'],12)
+            self.assertEqual(applied[-1]['cs_limit'],p['spice_config']['cs_limit'])
+            next(w for w in buttons if w.cget('text')=='完整对比').invoke()
+            next(w for w in buttons if w.cget('text')=='应用到计算器').invoke()
+            self.assertEqual(applied[-1]['fra_enabled'],1)
+            self.assertEqual(applied[-1]['cross_enabled'],1)
+        finally:root.destroy()
+
     def test_reference_buttons_for_all_six_topology_control_contexts(self):
         import json
         from design_engine.specification import load_spec
@@ -116,7 +138,14 @@ class SpiceUICheck(unittest.TestCase):
             dialog.geometry('1120x760')
             end=time.monotonic()+.4
             while time.monotonic()<end:root.update();time.sleep(.01)
-            self.assertLessEqual(logic.canvas.bbox('all')[2],logic.view.canvas.winfo_width()+2)
+            # Small windows now retain readable diagram boxes and expose a
+            # horizontal scrollbar, instead of shrinking text into overlaps.
+            extent=tuple(float(v) for v in logic.canvas.cget('scrollregion').split())
+            self.assertLessEqual(logic.canvas.bbox('all')[2],extent[2]+2)
+            self.assertTrue(logic.xscroll.winfo_ismapped())
+            logic.canvas.xview_moveto(1);root.update()
+            self.assertGreater(logic.canvas.xview()[0],0)
+            self.assertAlmostEqual(logic.canvas.xview()[1],1)
             capture(dialog,folder/'desktop-settings-small.png')
             with tempfile.TemporaryDirectory() as td, patch('spice_ui.filedialog.asksaveasfilename',return_value=str(Path(td)/'project.zip')),patch('spice_ui.messagebox.showinfo') as info:
                 button=next(w for w in descendants(dialog) if isinstance(w,ttk.Button) and '导出 ASC' in w.cget('text'))

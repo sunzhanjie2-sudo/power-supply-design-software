@@ -30,6 +30,7 @@ class Tooltip:
         self.owner = widget.winfo_toplevel()
         if not hasattr(self.owner, '_tooltip_instances'):
             self.owner._tooltip_instances = weakref.WeakSet()
+            self.owner._active_tooltips = weakref.WeakSet()
             # Child bindtags include their toplevel: clicking/scrolling anywhere
             # in the window also dismisses a pending hint. Bind once per owner.
             for sequence in ('<ButtonPress>', '<MouseWheel>', '<FocusOut>', '<Unmap>', '<Configure>'):
@@ -43,7 +44,9 @@ class Tooltip:
 
     @staticmethod
     def hide_all(owner):
-        for hint in tuple(getattr(owner, '_tooltip_instances', ())):
+        # Configure/Unmap fires for every field during reflow. Only pending or
+        # visible hints need cleanup, not the entire parameter panel each time.
+        for hint in tuple(getattr(owner, '_active_tooltips', ())):
             hint.leave()
 
     def enter(self, _event=None):
@@ -51,6 +54,7 @@ class Tooltip:
         try:
             if self.widget.winfo_exists() and self.widget.winfo_ismapped():
                 self.job = self.widget.after(600, self.show)
+                self.owner._active_tooltips.add(self)
         except tk.TclError:
             pass
 
@@ -81,6 +85,7 @@ class Tooltip:
             return
         try:
             self.popup = tk.Toplevel(self.owner)
+            self.owner._active_tooltips.add(self)
             self.popup.withdraw()
             self.popup.wm_overrideredirect(True)
             self.popup.transient(self.owner)
@@ -92,6 +97,7 @@ class Tooltip:
             self.leave()
 
     def leave(self, _event=None):
+        self.owner._active_tooltips.discard(self)
         job, self.job = self.job, None
         popup, self.popup = self.popup, None
         if job is not None:
@@ -144,12 +150,9 @@ class EngineeringUI:
     def _sync_parameter_scrollregion(self):
         self._param_layout_job = None
         if not getattr(self, '_closing', False) and not getattr(self,'_param_scroll_syncing',False):
-            self._param_scroll_syncing=True
-            try:
-                # Finish nested geometry requests even when the old canvas
-                # window is entirely offscreen and cannot emit Configure.
-                self.left_inner.update_idletasks()
-            finally:self._param_scroll_syncing=False
+            # The scheduled pass follows geometry notifications. Do not enter
+            # a nested idle loop here: that also draws every pending figure and
+            # starves input/timer events during a multi-output reflow.
             canvas=self.left_canvas
             width=max(1,canvas.winfo_width())
             height=max(self.left_inner.winfo_reqheight(),canvas.winfo_height())
@@ -181,6 +184,18 @@ class EngineeringUI:
 
     def _build_review_tab(self):
         nb = ttk.Notebook(self.tab_review); nb.pack(fill='both',expand=True,padx=4,pady=4)
+        self.review_notebook = nb
+        acceptance_frame = ttk.Frame(nb)
+        nb.add(acceptance_frame, text='工程验证与验收')
+        from engineering_acceptance_ui import AcceptancePanel
+        self.acceptance_panel = AcceptancePanel(acceptance_frame, get_spec=self._current_spec,
+            on_apply=lambda data: self._acceptance_apply(data),
+            on_refresh=lambda: self._acceptance_refresh_endpoints(),
+            on_import_evidence=lambda: self._acceptance_import_evidence(),
+            get_range_result=lambda: self._acceptance_get_range_result(),
+            get_joint_record=lambda: self._acceptance_get_joint_record(),
+            get_spice_evidence=lambda: self._acceptance_get_spice_evidence())
+        self.acceptance_panel.pack(fill='both', expand=True)
         check_frame, corner_frame, compare_frame = [ttk.Frame(nb) for _ in range(3)]
         for f,label in [(check_frame,'统一设计检查'),(corner_frame,'固定硬件角点'),(compare_frame,'方案 A / B 对比')]:
             nb.add(f,text=label)
@@ -231,8 +246,12 @@ class EngineeringUI:
         if hasattr(self,'review_tree'):
             self.review_tree.delete(*self.review_tree.get_children())
             self.review_summary.set('当前输入未成功计算：'+error)
+        if hasattr(self, 'acceptance_panel'):
+            self.acceptance_panel.refresh()
 
     def _update_review(self):
+        if hasattr(self, 'acceptance_panel'):
+            self.acceptance_panel.refresh()
         if not self._snapshot_valid or not self._last or not hasattr(self,'review_tree'):
             return
         checks = self._last['checks']
@@ -257,6 +276,10 @@ class EngineeringUI:
     def _current_spec(self):
         p = self.get_params()
         p.update(self._rcd_parameters())
+        if hasattr(self, '_winding_config'):
+            winding = self._winding_config().get('winding_config') or {}
+            if winding.get('window_width', 0) > 0 and winding.get('window_height', 0) > 0:
+                p['winding_config'] = copy.deepcopy(winding)
         return p
 
     def _invalidate_workflows(self):

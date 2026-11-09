@@ -7,6 +7,7 @@ def present(run):
     from topology_diagram import topology_components
     from semiconductor import device_stress
     from winding_layout import transformer_windings, assess_winding_window
+    from magnetic_report_view import build_report
     compact = run.to_dict(include_waveforms=False, include_details=False)
     bundle = run.runtime_bundle()
     displays = []
@@ -23,10 +24,11 @@ def present(run):
             if device:
                 magnetics.append(dict(kind=kind, **{key: copy.deepcopy(device.get(key)) for key in
                     ('ok','core','core_label','core_geometry','Ae','Ve','Wa','MLT','MLT_source',
-                     'Np','Ns','N','B_pk','dB','gap','P_core','P_cu','P_total','dT','fill',
+                     'Np','Ns','N','B_pk','dB','gap','gap_design','P_core','P_cu','P_total','dT','fill',
                      'R_dc_p','R_dc_s','R_dc','J_actual_p','J_actual_s','J_actual','windings','reason',
                      'I_rms_p','I_rms_s','I_rms','d_wire','d_wire_p','d_wire_s','n_strand_p','n_strand_s',
-                     'Fr','Fr_p','Fr_s','ap','A_surf','Rth_transformer','auxiliary','output_id','id','name')}))
+                     'Fr','Fr_p','Fr_s','ap','A_surf','Rth_transformer','auxiliary','output_id','id','name','parallel_wires_p','parallel_wires_s',
+                     'design_enabled','L','I_pk','inductor_rated_current','inductor_saturation_current','P_extra','note')}))
         windings = transformer_windings(result)
         winding_assessment = None
         if windings:
@@ -48,7 +50,7 @@ def present(run):
         from component_management import evaluate_components, compact_projection
         displays.append(dict(id=case['id'], components=topology_components(case['p'], result['op']),
             component_management=compact_projection(evaluate_components(case['p'], result), with_row_checks=True),
-            magnetics=magnetics, switch_loss=result['semi']['switch'],
+            magnetics=magnetics, magnetic_report=build_report(case['p'], result), switch_loss=result['semi']['switch'],
             stress=device_stress(result['op']),semiconductors={key:result['semi'].get(key) for key in
                 ('switch','diode','auxiliary','freewheel','n_switches','n_diodes','P_total')},
             operating_point=scalar_op,capacitors=result.get('capacitors',{}),
@@ -65,4 +67,6 @@ def present(run):
             loop_available=result.get('loop') is not None,
             waveform_points=len(result['wf']['t'])))
     compact['display'] = json_value(displays)
+    from engineering_acceptance import report_snapshot
+    compact['engineering_acceptance'] = report_snapshot(bundle['base_spec'], range_result=bundle)
     return compact

@@ -57,6 +57,8 @@ def load_spec(spec):
             p[k] = v
     if errors:
         raise ValueError('invalid spec: ' + '; '.join(errors))
+    from engineering_acceptance import normalize as normalize_acceptance
+    p['engineering_acceptance'] = normalize_acceptance(p.get('engineering_acceptance'))
     from component_management import normalize_management
     from parasitics import normalize as normalize_parasitics
     if p.get('parasitic_config'):

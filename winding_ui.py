@@ -1,21 +1,22 @@
 """Local, inexpensive transformer-window geometry editor on the magnetics page."""
 import math
+import copy
 import tkinter as tk
 from tkinter import ttk
 
 from winding_layout import (DEFAULT_WINDING_CONFIG,DEFAULT_WIRE_OVERRIDE,validate_winding_config,
-    transformer_windings,assess_winding_window,draw_winding_cross_section,build_automatic_layer_plan)
+    transformer_windings,assess_winding_window,draw_winding_cross_section,build_automatic_layer_plan,identify_layers)
 
 
 GEOMETRY_FIELDS=(('window_width','窗口净宽',1e3),('window_height','窗口净高',1e3),
     ('margin_x','左右留边（每侧）',1e3),('margin_y','上下留边（每侧）',1e3),
-    ('diameter_allowance','含漆外径增量 Δd',1e3),('layer_insulation','层间绝缘厚度',1e3),
-    ('interwinding_insulation','绕组间绝缘厚度',1e3),('wire_gap','线束与匝间净隙',1e3))
+    ('diameter_allowance','含漆外径增量 Δd',1e3),('layer_insulation','同绕组相邻层绝缘',1e3),
+    ('interwinding_insulation','不同绕组相邻层绝缘',1e3),('wire_gap','线束与匝间净隙',1e3))
 
 WIRE_CHOICES={'wire_type':{'自动：多股利兹 / 单股铜线':'auto','普通铜线（不压扁）':'solid','利兹线（等效压扁）':'litz'},
     'winding_style':{'疏绕：沿窗口均匀分布':'sparse','密绕：靠左':'dense_left','密绕：靠右':'dense_right'}}
 WIRE_FIELDS=(('wire_type','线材类型'),('winding_style','绕制方式'),
-    ('parallel_bundles','每匝并绕束数'),('turns_per_layer','每层匝数（0=自动）'),
+    ('parallel_bundles','每根线内分束数'),('turns_per_layer','每层匝数（0=自动）'),
     ('outer_diameter','单股含漆外径\nmm，0=自动'),('bundle_diameter','整束未压扁外径\nmm，0=估算'),
     ('packing_factor','束内填充系数\n0 < 系数 ≤ 1'),('flatten_ratio','利兹线压扁宽度倍数\n≥ 1'))
 LAYER_STYLE_CHOICES={'跟随该绕组':None,**WIRE_CHOICES['winding_style']}
@@ -31,10 +32,13 @@ class WindingUI:
         self._winding_job=None
         self._winding_row_signature=None
         self._winding_assessment=None
+        self._geometry_profile=None
         self._winding_selected=tk.StringVar(value='P')
         self._winding_selected.trace_add('write',self._select_winding_details)
         self._winding_binding_details=False
         self._winding_layer_plan=[]
+        self._winding_positions={}
+        self._winding_position_history=[]
         self._winding_plan_enabled=tk.BooleanVar(value=False)
         self._winding_plan_enabled.trace_add('write',self._toggle_winding_plan)
         self._winding_binding_plan=False
@@ -53,7 +57,10 @@ class WindingUI:
                 values[key]=float(text or '0')/scale
             except (ValueError,tk.TclError):
                 raise ValueError(caption+' 请填写有限非负数值（mm）') from None
-        values.update(order=list(self._winding_order),overrides={},layer_plan=[])
+        values.update(order=list(self._winding_order),overrides={},layer_plan=[],
+                      turn_positions=copy.deepcopy(self._winding_positions))
+        if self._geometry_profile is not None:
+            values['model_3d']=self._geometry_profile
         for key,variables in self._winding_overrides.items():
             try:
                 entry={name:(variable.get() if name in WIRE_CHOICES else float(variable.get() or 0))
@@ -77,6 +84,7 @@ class WindingUI:
                     raise ValueError(f'第 {index} 层匝数不是有效数字') from None
                 if entry.get('winding_style'):
                     row['winding_style']=entry['winding_style']
+                if 'section_id' in entry: row['section_id']=entry['section_id']
                 values['layer_plan'].append(row)
         return dict(winding_config=validate_winding_config(values))
 
@@ -88,6 +96,9 @@ class WindingUI:
                 value=candidate[key]*scale
                 self._winding_vars[key].set('' if key in ('window_width','window_height') and not value else f'{value:.10g}')
             self._winding_order=list(candidate['order'])
+            self._geometry_profile=candidate.get('model_3d')
+            self._winding_positions=copy.deepcopy(candidate.get('turn_positions',{}))
+            self._winding_position_history=[]
             self._winding_layer_plan=[dict(entry,turns=str(entry['turns'])) for entry in candidate.get('layer_plan',[])]
             self._winding_plan_enabled.set(bool(self._winding_layer_plan))
             for variables in self._winding_overrides.values():
@@ -128,6 +139,12 @@ class WindingUI:
             return widget
         label(text='骨架净窗口的单侧轴向 × 径向截面；每束多股线画一个等效截面，所有尺寸按同一比例绘制。不能用磁芯 Wa 直接代替窗口宽高。',
                   style='Muted.TLabel').pack(fill='x',padx=10,pady=(9,5))
+        from geometry_ui import edit_profile,export_package
+        model_bar=ttk.Frame(body);model_bar.pack(fill='x',padx=9,pady=(0,4))
+        ttk.Button(model_bar,text='三维建模设置…',command=lambda:edit_profile(self)).pack(side='left')
+        ttk.Button(model_bar,text='导出三维建模数据…',command=lambda:export_package(self)).pack(side='left',padx=6)
+        ttk.Button(model_bar,text='仿真与报告中心…',
+                   command=self._export_joint_ui).pack(side='left')
         inputs=ttk.LabelFrame(body,text='窗口与绝缘设置（长度均为 mm）',padding=7)
         inputs.pack(fill='x',padx=8,pady=4)
         self._winding_geometry_frame=inputs
@@ -142,7 +159,9 @@ class WindingUI:
             self._winding_geometry_widgets.append((caption_widget,entry))
         for column in (1,3):
             inputs.columnconfigure(column,weight=1)
-        label(text='电气参数中的股数是每匝总股数，不会因并绕束数重复增加。例：60 股分成 3 束，每束 20 股。自动模式将多股视为利兹线，单股铜线不压扁；非利兹多股线请选择普通铜线。',
+        self._winding_insulation_note=tk.StringVar()
+        label(textvariable=self._winding_insulation_note,style='Muted.TLabel').pack(fill='x',padx=10,pady=4)
+        label(text='左侧“线圈并绕数”是相同整根线的并联根数：2 根、6 匝共 12 个线束截面，电气匝数仍为 6。股数表示单根线内股数；下方分束只分配已有股数。自动模式将多股视为利兹线，单股铜线不压扁。',
                   style='Muted.TLabel').pack(fill='x',padx=10,pady=5)
         self._winding_rows_frame=ttk.LabelFrame(body,text='绕组顺序（由骨架向外）· 点选绕组后编辑下方设置',padding=5)
         self._winding_rows_frame.pack(fill='x',padx=8,pady=4)
@@ -155,6 +174,15 @@ class WindingUI:
         self._build_winding_plan(body,label)
         self.winding_summary=tk.StringVar(value='请先填写骨架窗口净宽与净高。')
         label(textvariable=self.winding_summary,style='Result.TLabel').pack(fill='x',padx=10,pady=6)
+        editbar=ttk.Frame(body,padding=(8,4));editbar.pack(fill='x')
+        ttk.Button(editbar,text='一键均匀排布',command=self._uniform_winding_positions).grid(row=0,column=0,sticky='ew',padx=3,pady=3)
+        ttk.Button(editbar,text='撤销位置调整',command=self._undo_winding_position).grid(row=0,column=1,sticky='ew',padx=3,pady=3)
+        ttk.Label(editbar,text='键盘步长 / mm').grid(row=1,column=0,sticky='w',padx=3)
+        self._winding_move_step=tk.StringVar(value='.01')
+        ttk.Entry(editbar,textvariable=self._winding_move_step,width=7).grid(row=1,column=1,sticky='ew',padx=3,pady=3)
+        editbar.columnconfigure(0,weight=1);editbar.columnconfigure(1,weight=1)
+        self._winding_position_note=tk.StringVar()
+        label(textvariable=self._winding_position_note,style='Muted.TLabel').pack(fill='x',padx=10,pady=4)
         plot=ttk.Frame(body,height=470)
         plot.pack(fill='x',padx=7,pady=4)
         plot.pack_propagate(False)
@@ -162,6 +190,9 @@ class WindingUI:
         self.ax_winding=self.fig_winding.subplots()
         self.canvas_winding=FigureCanvasTkAgg(self.fig_winding,master=plot)
         self.canvas_winding.get_tk_widget().pack(fill='both',expand=True)
+        from winding_drag_ui import WindingDragController
+        self._winding_drag=WindingDragController(self.canvas_winding,self.ax_winding,self._commit_winding_position,
+            self._winding_position_note,self._winding_move_step,self._undo_winding_position)
         label(text='几何预评估，不是可量产工艺或安规判定。图中骨架挡墙仅作示意，不占用用户输入的净窗口。利兹线默认宽 ×1.5、高 ÷1.5，为等面积假设，不代表实物必然可压到此尺寸。未包含引线、交叉线、骨架圆角和工艺公差；外径与绝缘必须按实物确认。调整截面不会改变铜损、漏感或 kij。',
                   style='Muted.TLabel').pack(fill='x',padx=10,pady=(6,12))
         body.bind('<Configure>',self._resize_winding_text,add='+')
@@ -209,14 +240,19 @@ class WindingUI:
         self._winding_plan_body.pack(fill='x',pady=(6,0))
         content=self._winding_plan_body
         table=ttk.Frame(content);table.pack(fill='x')
-        self._winding_plan_tree=ttk.Treeview(table,columns=('layer','winding','turns','style'),show='headings',height=7,selectmode='browse')
-        for name,caption,width in (('layer','实体层',55),('winding','绕组',75),('turns','本层匝数',80),('style','本层绕法',165)):
+        table.columnconfigure(0,weight=1)
+        self._winding_plan_tree=ttk.Treeview(table,columns=('layer','winding','turns','style','insulation_kind','insulation_mm'),
+                                            show='headings',height=7,selectmode='browse')
+        for name,caption,width in (('layer','实体层',55),('winding','绕组',65),('turns','本层匝数',80),('style','本层绕法',165),
+                                   ('insulation_kind','前置绝缘类型',120),('insulation_mm','厚度 / mm',90)):
             self._winding_plan_tree.heading(name,text=caption)
-            self._winding_plan_tree.column(name,width=width,minwidth=45,anchor='center',stretch=name=='style')
-        self._winding_plan_tree.pack(side='left',fill='both',expand=True)
+            self._winding_plan_tree.column(name,width=width,minwidth=width,anchor='center',stretch=name=='style')
+        self._winding_plan_tree.grid(row=0,column=0,sticky='nsew')
         scrollbar=ttk.Scrollbar(table,orient='vertical',command=self._winding_plan_tree.yview)
-        scrollbar.pack(side='right',fill='y')
-        self._winding_plan_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.grid(row=0,column=1,sticky='ns')
+        horizontal=ttk.Scrollbar(table,orient='horizontal',command=self._winding_plan_tree.xview)
+        horizontal.grid(row=1,column=0,sticky='ew')
+        self._winding_plan_tree.configure(yscrollcommand=scrollbar.set,xscrollcommand=horizontal.set)
         self._winding_plan_tree.bind('<<TreeviewSelect>>',self._select_winding_plan_layer)
         editor=ttk.Frame(content);editor.pack(fill='x',pady=(5,0));editor.columnconfigure(1,weight=1)
         self._winding_plan_editor_vars={name:tk.StringVar() for name in ('winding_id','turns','winding_style')}
@@ -270,7 +306,7 @@ class WindingUI:
         tree.delete(*tree.get_children())
         for index,entry in enumerate(self._winding_layer_plan):
             style=next((label for label,value in LAYER_STYLE_CHOICES.items() if value==entry.get('winding_style')),'跟随该绕组')
-            tree.insert('', 'end',iid=str(index),values=(index+1,entry['winding_id'],entry['turns'],style))
+            tree.insert('', 'end',iid=str(index),values=(index+1,entry['winding_id'],entry['turns'],style,'待评估','—'))
         if self._winding_layer_plan:
             selected=min(max(0,selected or 0),len(self._winding_layer_plan)-1)
             tree.selection_set(str(selected));tree.see(str(selected))
@@ -308,7 +344,7 @@ class WindingUI:
         else:
             entry[name]=value
         style=next((label for label,code in LAYER_STYLE_CHOICES.items() if code==entry.get('winding_style')),'跟随该绕组')
-        self._winding_plan_tree.item(str(index),values=(index+1,entry['winding_id'],entry['turns'],style))
+        self._winding_plan_tree.item(str(index),values=(index+1,entry['winding_id'],entry['turns'],style,'待评估','—'))
         self._update_winding_plan_note()
         self._schedule_winding_redraw()
 
@@ -339,6 +375,8 @@ class WindingUI:
         try:
             cfg=self._winding_config(include_layer_plan=False)['winding_config']
             plan=build_automatic_layer_plan(self._ordered_winding_rows(),cfg)
+            self._remember_winding_position()
+            self._winding_positions={}
             self._winding_layer_plan=[dict(entry,turns=str(entry['turns'])) for entry in plan]
             self._winding_plan_enabled.set(True)
             self._render_winding_plan(0)
@@ -356,7 +394,9 @@ class WindingUI:
         key=self._winding_layer_plan[index]['winding_id'] if index is not None else self._winding_selected.get()
         if key not in {row['id'] for row in rows}:key=rows[0]['id']
         position=index+1 if index is not None else len(self._winding_layer_plan)
-        self._winding_layer_plan.insert(position,dict(winding_id=key,turns='1'))
+        from uuid import uuid4
+        self._winding_layer_plan.insert(position,dict(winding_id=key,turns='1',section_id='SEC_'+uuid4().hex))
+        identify_layers(self._winding_layer_plan)
         self._render_winding_plan(position);self._schedule_winding_redraw()
 
     def _delete_winding_plan_layer(self):
@@ -384,7 +424,11 @@ class WindingUI:
             self._winding_plan_note.set('仅能拆分匝数 ≥ 2 的整数层，且总层数不能超过 1000。');return
         turns=int(value);first=turns//2
         entry=self._winding_layer_plan[index]
-        self._winding_layer_plan[index:index+1]=[dict(entry,turns=str(first)),dict(entry,turns=str(turns-first))]
+        second=dict(entry,turns=str(turns-first))
+        from uuid import uuid4
+        second['section_id']='SEC_'+uuid4().hex
+        self._winding_layer_plan[index:index+1]=[dict(entry,turns=str(first)),second]
+        identify_layers(self._winding_layer_plan)
         self._render_winding_plan(index+1);self._schedule_winding_redraw()
 
     def _select_winding_details(self,*_):
@@ -495,20 +539,20 @@ class WindingUI:
         if not hasattr(self,'_winding_rows_frame'):
             return
         rows=self._ordered_winding_rows()
-        signature=[(r['id'],r['turns'],r['strands'],r['bare_diameter']) for r in rows]
+        signature=[(r['id'],r['turns'],r['strands'],r.get('parallel_wires',1),r['bare_diameter']) for r in rows]
         if signature==self._winding_row_signature:
             return
         self._winding_row_signature=signature
         for child in self._winding_rows_frame.winfo_children():
             child.destroy()
         frame=self._winding_rows_frame
-        for column,caption in enumerate(('选择 / 绕组','匝数','每匝总股数','单股裸径 mm')):
+        for column,caption in enumerate(('选择 / 绕组','匝数','股数 / 并绕根数','单股裸径 mm')):
             ttk.Label(frame,text=caption,justify='center',style='Muted.TLabel').grid(row=0,column=column,sticky='w',padx=5,pady=3)
         for index,row in enumerate(rows,1):
             key=row['id']
             self._winding_override_vars(key)
             ttk.Radiobutton(frame,text=key,variable=self._winding_selected,value=key).grid(row=index,column=0,sticky='w',padx=4,pady=3)
-            for column,value in ((1,int(row['turns'])),(2,int(row['strands'])),(3,f"{row['bare_diameter']*1e3:.4g}")):
+            for column,value in ((1,int(row['turns'])),(2,f"{int(row['strands'])} 股 × {row.get('parallel_wires',1)} 根"),(3,f"{row['bare_diameter']*1e3:.4g}")):
                 ttk.Label(frame,text=str(value)).grid(row=index,column=column,sticky='w',padx=5,pady=3)
         if not rows:
             ttk.Label(frame,text='当前没有有效变压器；非隔离拓扑不适用。').grid(row=1,column=0,columnspan=4,sticky='w',pady=6)
@@ -559,7 +603,8 @@ class WindingUI:
             cfg=self._winding_config()['winding_config']
             assessment=assess_winding_window(self._ordered_winding_rows(),cfg)
             self._winding_assessment=assessment
-            draw_winding_cross_section(self.ax_winding,assessment)
+            artists=draw_winding_cross_section(self.ax_winding,assessment)
+            if hasattr(self,'_winding_drag'):self._winding_drag.scene(assessment,artists)
             if not assessment['configured']:
                 text='请填写骨架净窗口宽和高。默认留边及绝缘值仅供预估，须按实际材料和工艺修改。'
             elif not assessment['windings']:
@@ -581,9 +626,74 @@ class WindingUI:
                 text='电气参数已变化，以下仅对应上一有效计算；新计算完成后自动更新。\n'+text
             self.winding_summary.set(text)
         except (ValueError,TypeError) as exc:
+            if hasattr(self,'_winding_drag'):self._winding_drag.scene(None,None)
             self.ax_winding.clear()
             self.ax_winding.set_axis_off()
             self.ax_winding.text(.5,.5,'绕制输入待修正\n'+str(exc),ha='center',va='center',wrap=True,transform=self.ax_winding.transAxes,fontsize=10)
             self.winding_summary.set('未生成有效评估：'+str(exc))
+        self._update_winding_insulation_readout()
         self.canvas_winding.request_draw()
         self._winding_view.sync()
+
+    def _update_winding_insulation_readout(self):
+        assessment=self._winding_assessment
+        layers=(assessment or {}).get('physical_layers') or []
+        kinds={'none':'首层', 'layer':'同绕组相邻层', 'interwinding':'不同绕组相邻层'}
+        if self._winding_plan_enabled.get():
+            tree=self._winding_plan_tree
+            for index in range(len(self._winding_layer_plan)):
+                layer=layers[index] if index<len(layers) else None
+                tree.set(str(index),'insulation_kind',kinds[layer['insulation_kind']] if layer else '待评估')
+                tree.set(str(index),'insulation_mm',f"{layer['insulation_before']*1e3:.4g}" if layer else '—')
+        text='绝缘按相邻物理层的绕组判定：P–P 用同绕组值，P–OUT1 或 OUT1–OUT2 用不同绕组值。'
+        if layers:
+            counts={kind:sum(layer['insulation_kind']==kind for layer in layers) for kind in ('layer','interwinding')}
+            cfg=assessment['config']
+            text+=f" 当前同绕组界面 {counts['layer']} 处（{cfg['layer_insulation']*1e3:g} mm），"
+            text+=f"不同绕组界面 {counts['interwinding']} 处（{cfg['interwinding_insulation']*1e3:g} mm）。"
+        self._winding_insulation_note.set(text)
+
+    def _remember_winding_position(self):
+        state=dict(positions=copy.deepcopy(self._winding_positions),plan=copy.deepcopy(self._winding_layer_plan),
+                   enabled=self._winding_plan_enabled.get(),styles={key:v['winding_style'].get() for key,v in self._winding_overrides.items()})
+        self._winding_position_history.append(state)
+        del self._winding_position_history[:-50]
+
+    def _commit_winding_position(self,point,center):
+        if self._winding_assessment is None:return
+        from winding_positions import freeze_plan
+        self._remember_winding_position()
+        self._winding_loading=True
+        try:
+            if not self._winding_plan_enabled.get():
+                self._winding_layer_plan=[dict(row,turns=str(row['turns'])) for row in freeze_plan(self._winding_assessment)]
+                self._winding_plan_enabled.set(True)
+                self._render_winding_plan()
+            self._winding_positions.setdefault(point['section_id'],{})[point['position_key']]=float(center)
+        finally:self._winding_loading=False
+        self._cancel_winding_redraw()
+        self._winding_job=self.root.after(90,self._refresh_winding)
+
+    def _undo_winding_position(self):
+        if not self._winding_position_history:return
+        state=self._winding_position_history.pop()
+        self._winding_loading=True
+        try:
+            self._winding_positions=state['positions'];self._winding_layer_plan=state['plan']
+            self._winding_plan_enabled.set(state['enabled'])
+            for key,style in state['styles'].items():self._winding_override_vars(key)['winding_style'].set(style)
+            self._render_winding_plan()
+        finally:self._winding_loading=False
+        self._refresh_winding()
+
+    def _uniform_winding_positions(self):
+        if self._winding_assessment is None:return
+        self._remember_winding_position()
+        self._winding_loading=True
+        try:
+            self._winding_positions={}
+            for row in self._winding_layer_plan:row['winding_style']='sparse'
+            for values in self._winding_overrides.values():values['winding_style'].set('sparse')
+            self._render_winding_plan()
+        finally:self._winding_loading=False
+        self._refresh_winding()

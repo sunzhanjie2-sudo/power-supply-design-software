@@ -18,6 +18,7 @@ def worker_main(inbox, outbox, generation, operation_cancellations, folder):
     from web_app.presentation import present
     current, current_id, compensation = None, None, None
     current_name = ''
+    current_config=None
     root = Path(folder).resolve()
     while True:
         command = inbox.get()
@@ -45,6 +46,7 @@ def worker_main(inbox, outbox, generation, operation_cancellations, folder):
                 current,current_id,compensation=None,None,None
             elif command['kind'] == 'calculate':
                 current_name=command['spec'].get('__web_project_title','')
+                current_config=None
                 # Free the previous numerical snapshot before allocating another.
                 current, current_id, compensation = None, None, None
                 gc.collect()
@@ -58,6 +60,7 @@ def worker_main(inbox, outbox, generation, operation_cancellations, folder):
                         raise CalculationCancelled()
                     result = present(run)
                     current, current_id = run, identity
+                    current_config=command['spec']
                     compensation = command['spec'].get('__comp')
                     if not isinstance(compensation, dict):
                         compensation = None
@@ -89,6 +92,20 @@ def worker_main(inbox, outbox, generation, operation_cancellations, folder):
                             comparison={key:comparison[key] for key in ('successful','total','fra_successful','fra_total','cross_successful','cross_total','incomplete')})
                         if cancelled():raise CalculationCancelled()
                         outbox.put(dict(id=identity,event='done',result=result))
+                        continue
+                    if suffix=='geometry':
+                        from transformer_geometry import export_geometry_package
+                        path=directory/('transformer-geometry-'+identity+'.zip')
+                        text=command.get('original_text')
+                        try:
+                            geometry=export_geometry_package(current,path,current_config,
+                                original_bytes=text.encode('utf-8') if text is not None else None,
+                                original_name=command.get('original_name'),cancelled=cancelled)
+                            if cancelled():raise CalculationCancelled()
+                        except BaseException:
+                            path.unlink(missing_ok=True);raise
+                        outbox.put(dict(id=identity,event='done',result=dict(path=str(path),
+                             media_type='application/zip',geometry=geometry)))
                         continue
                     real = bool(command.get('mos_real_time', False))
                     path = directory/('design-report-'+('real' if real else 'staged')+'.'+suffix)

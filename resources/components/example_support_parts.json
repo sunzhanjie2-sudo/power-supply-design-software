@@ -1,0 +1,113 @@
+{
+  "schema": "power-design.example-support-parts.v1",
+  "date": "2026-11-08",
+  "parts": {
+    "MKDS_2": {
+      "manufacturer": "Phoenix Contact",
+      "model": "MKDS 1,5/ 2-5,08 (1715721)",
+      "package": "2位 PCB螺钉端子 / 5.08 mm",
+      "voltage_V": 400,
+      "conditions": "原厂III/2条件400 V、17.5 A；III/3仅250 V，整机污染等级/爬电/导线与认证需另核。",
+      "sources": [
+        "https://www.phoenixcontact.com/en-us/products/printed-circuit-board-terminal-mkds-15-2-508-1715721"
+      ]
+    },
+    "XAL7070-473MEC": {
+      "manufacturer": "Coilcraft",
+      "model": "XAL7070-473MEC",
+      "package": "XAL7070 屏蔽一体成型 / SMD",
+      "calculation": {
+        "L": 4.7e-05,
+        "inductor_dcr": 0.09707,
+        "inductor_rated_current": 3.1,
+        "inductor_saturation_current": 4.2
+      },
+      "conditions": "Document856-2 Rev02/25/26 p2；47µH±20%，25°C DCR最大97.07mΩ，Irms=3.1A为20K温升参考，Isat=4.2A对应L下降30%典型值。",
+      "note": "按47µH常量计算，未建模L随电流变化、交流/磁芯附加损耗和实际PCB温升；Boost接近Isat时须复核L(I)与余量。",
+      "sources": [
+        "https://www.coilcraft.com/getmedia/1ba55433-bcc8-4838-9b21-382f497e12e0/xal7070.pdf"
+      ]
+    },
+    "XAL7070-223MEC": {
+      "manufacturer": "Coilcraft",
+      "model": "XAL7070-223MEC",
+      "package": "XAL7070 屏蔽一体成型 / SMD",
+      "calculation": {
+        "L": 2.2e-05,
+        "inductor_dcr": 0.03969,
+        "inductor_rated_current": 4.7,
+        "inductor_saturation_current": 5.6
+      },
+      "conditions": "Document856-2 Rev02/25/26 p2；22µH±20%，DCR最大39.69mΩ，Irms4.7A为20K温升参考，Isat5.6A对应L下降30%典型值；采用2026原厂PDF行，非网页历史行。",
+      "note": "未建模L(I)、交流/磁芯附加损耗或实际PCB温升。",
+      "sources": [
+        "https://www.coilcraft.com/getmedia/1ba55433-bcc8-4838-9b21-382f497e12e0/xal7070.pdf"
+      ]
+    },
+    "TLV75533PDBVR": {
+      "manufacturer": "Texas Instruments",
+      "model": "TLV75533PDBVR",
+      "package": "SOT-23-5 / DBV",
+      "calculation": {
+        "input_rating_min": 1.45,
+        "input_rating_max": 5.5,
+        "current_rating": 0.5,
+        "dropout_max": 0.238,
+        "Iq_max": 4e-05,
+        "accuracy_pct": 1.5,
+        "theta_ja": 231.1,
+        "junction_limit": 125,
+        "required_C_in": 4.7e-07,
+        "required_C_out": 4.7e-07,
+        "required_ESR_min": 0,
+        "required_ESR_max": 0.1,
+        "thermal_verified": false,
+        "enable_pin": true,
+        "power_good": false,
+        "reverse_blocking": "no",
+        "output_mode": "fixed"
+      },
+      "conditions": "SBVS320D RevD p4–6：推荐1.45..5.5V/0.5A；3.3V DBV全温最大压差238mV；空载最大IGND40µA；全温输出精度±1.5%；JEDEC板RθJA231.1K/W。",
+      "note": "40µA为规格书空载全温上限，非100mA负载下保证最大值；本静态初算沿用该参考，满载地电流需核对曲线/实测。RθJA为标准测试板，不是实际PCB验证。输出ESR上限0.1Ω为项目初筛设定，不宣称厂家保证稳定范围；不具备独立反向阻断。",
+      "sources": [
+        "https://www.ti.com/lit/ds/symlink/tlv755p.pdf",
+        "https://www.ti.com/product/TLV755P/part-details/TLV75533PDBVR"
+      ]
+    },
+    "GRM21BR71E225KA73L": {
+      "manufacturer": "Murata",
+      "model": "GRM21BR71E225KA73L",
+      "package": "0805 / 2012M / X7R",
+      "voltage_V": 25,
+      "capacitor_type": "mlcc",
+      "nominal_C_F": 2.2e-06,
+      "calculation": {
+        "C": 1.1e-06,
+        "ESR": 0.01
+      },
+      "conditions": "标称2.2µF±10%/25V X7R；有效容量按项目50%余量估为1.1µF（借鉴TI应用建议，非本型号直流偏压实测）；ESR10mΩ为工程参考。",
+      "note": "厂家没有统一额定纹波RMS；额定值留空。1.1µF有效容量与10mΩ ESR须按偏压/温度曲线复核，不能当作厂家最小保证。",
+      "sources": [
+        "https://www.murata.com/-/media/webrenewal/tool/library/common-pdf/static-model/component-list-s-mlcc-2506.ashx?la=en",
+        "https://www.ti.com/lit/ds/symlink/tlv755p.pdf"
+      ]
+    }
+  },
+  "magnetic_material_source": "https://www.dmegc.de/uploads/20230401/DMR44%20Material%20Characteristics.pdf",
+  "magnetic_material_note": "DMR44-REV.B：μi=2400±25%@10kHz/B<0.25mT/25°C，Bs=0.4T@100°C。自绕磁件结构来自各例实际设计，不虚构成品订货型号；项目Steinmetz拟合系数、Ri-a与几何假设仍按原配置，非此材料表直接给定。",
+  "rcd_candidate_sizing_basis": {
+    "date": "2026-11-08",
+    "scope": "维护生成器的初选功耗基准，来自换器件前同规格Vin端点复算；非实测或实装保证。候选串联数量=max(4,ceil(Pmax*1.2/(3W*20%)))，最终仍需新器件模型复核。",
+    "worst_power_W": {
+      "3_OUTPUT_COUPLED_FLYBACK.json": 1.025952885422152,
+      "3_OUTPUT_CROSS_REGULATION.json": 1.16274967868322,
+      "40W_CCM_3OUT_FLYBACK.json": 0.8330284243787249,
+      "40W_CCM_FLYBACK.json": 0.7288643412683891,
+      "6_OUTPUT_FLYBACK_SSR.json": 0.7288643412683891,
+      "90W_QR_L6565_300V.json": 1.014558725744455,
+      "90W_QR_L6565_300V_TUNED.json": 1.648745519713263,
+      "MP6005_PSR_FLYBACK.json": 0.7288643412683891,
+      "spec_flyback.json": 1.9109313215400656
+    }
+  }
+}

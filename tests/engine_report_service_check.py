@@ -41,8 +41,10 @@ class ReportServiceChecks(unittest.TestCase):
                 checks.assert_not_called()
             document = Document(folder/'design.docx')
             text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
-            self.assertIn('[Vinmin]', text)
-            self.assertIn('[Vinmax]', text)
+            combined=text+'\n'+'\n'.join(c.text for t in document.tables for r in t.rows for c in r.cells)
+            self.assertIn('Vinmin', combined)
+            self.assertIn('Vinmax', combined)
+            self.assertIn('需求与共同硬件',text)
             self.assertGreater(len(document.inline_shapes), 5)
             with ZipFile(folder/'design.xlsx') as archive:
                 self.assertIsNone(archive.testzip())
@@ -62,6 +64,7 @@ class ReportServiceChecks(unittest.TestCase):
     def test_review_targets_are_frozen_before_preparation(self):
         import main
         app = main.PowerSupplyAnalyzer.__new__(main.PowerSupplyAnalyzer)
+        app._engineering_acceptance = {}
         app.params = {'target_eta': Mock(get=lambda: .95), 'pm_target': Mock(get=lambda: 70.)}
         app.get_param = lambda key: 1200.
         app._winding_config = lambda: dict(winding_config=dict(window_width=0., window_height=0.))
@@ -78,6 +81,9 @@ class ReportServiceChecks(unittest.TestCase):
         run = calculate(spec, analysis='endpoints', include_cross_regulation=False)
         bundle = run.runtime_bundle()
         app = main.PowerSupplyAnalyzer.__new__(main.PowerSupplyAnalyzer)
+        app._engineering_acceptance = {}
+        app._acceptance_evidence_reference = None
+        app._acceptance_evidence_cache = None
         app._snapshot_valid = True
         app._last = {'p': bundle['base_spec']}
         app.root, app.status_var = Mock(), Mock()

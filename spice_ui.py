@@ -13,6 +13,7 @@ def comparison_feedback(result):
     counts=(f"瞬态完成 {result['successful']}/{result['total']}；"
         f"有效 FRA {result['fra_successful']}/{result['fra_total']}；"
         f"完整交叉调整率 {result['cross_successful']}/{result['cross_total']}。\n")
+    if result.get('cached_nominal'):counts+=f"其中 {result['cached_nominal']} 个标称工况复用已有有效结果。\n"
     if not result['successful']:
         return 'warning','仿真未完成','所有工况均未完成，已保存诊断报告与工程 ZIP。\n'+counts+'报告中没有有效仿真对比数据，请查看各工况日志与失败原因。\n'
     if result['incomplete']:
@@ -34,15 +35,20 @@ def open_export_dialog(parent,parameters,apply_settings,*,get_parameters=None,in
     if parameters.get('parasitic_config'):
         keys=[k for k in keys if k not in ('diode_cj_pf','qr_cds_pf')]
     if parameters.get('topology') not in ('FLYBACK','QR-FLYBACK','ACF-FORWARD','BUCK','BOOST') or parameters.get('feedback_mode','SSR')!='SSR':
-        messagebox.showinfo('LTspice 闭环','支持固定频率反激、有源钳位正激 SSR 与单路 QR 反激 SSR。',parent=parent);return
+        messagebox.showinfo('LTspice 闭环','支持固定频率反激、有源钳位正激与准谐振反激的 SSR 闭环。',parent=parent);return
     window=tk.Toplevel(parent);window.title('通用电源控制器配置与仿真对比')
     window.geometry(f'{min(1580,parent.winfo_screenwidth()-60)}x{min(920,parent.winfo_screenheight()-100)}');window.transient(parent)
     window.minsize(1000,620)
-    window.columnconfigure(0,weight=1);window.rowconfigure(2,weight=1)
+    window.columnconfigure(0,weight=1);window.rowconfigure(3,weight=1)
     ttk.Label(window,text=profile(parameters)['name'] if noniso else '准谐振反激 · L6565 逻辑参考 / ZCD / CS' if qr else '有源钳位正激 · MP6005 / GATE / SYNC / 死区' if forward else '反激控制器 · 频率 / 软启动 / Vcs / 短路逻辑',font=('',15,'bold')).grid(row=0,column=0,sticky='w',padx=14,pady=12)
     toolbar=ttk.Frame(window,padding=(14,0));toolbar.grid(row=1,column=0,sticky='ew')
     settings=normalize_settings(parameters.get('spice_config'));variables={};groups={};traces=[]
-    body=ttk.Panedwindow(window,orient='horizontal');body.grid(row=2,column=0,sticky='nsew',padx=14,pady=10)
+    from spice_planning import recommend_settings,execution_plan,plan_text
+    planbar=ttk.Frame(window,padding=(14,6));planbar.grid(row=2,column=0,sticky='ew')
+    actions=ttk.Frame(planbar);actions.pack(fill='x')
+    plan_label=ttk.Label(planbar,wraplength=1400,justify='left');plan_label.pack(fill='x',pady=(6,0))
+    plan_job=[None]
+    body=ttk.Panedwindow(window,orient='horizontal');body.grid(row=3,column=0,sticky='nsew',padx=14,pady=8)
     left=ttk.Frame(body,width=780);left.columnconfigure(0,weight=1);left.rowconfigure(0,weight=1)
     ttk.Style(window).configure('Controller.TNotebook.Tab',font=('',10),padding=(6,7))
     notebook=ttk.Notebook(left,style='Controller.TNotebook');notebook.grid(row=0,column=0,sticky='nsew')
@@ -68,9 +74,12 @@ def open_export_dialog(parent,parameters,apply_settings,*,get_parameters=None,in
         else:widget=ttk.Entry(form,textvariable=variable,width=20)
         widget.grid(row=row,column=col+1,sticky='ew',padx=(0,18),pady=10)
         widget.bind('<FocusIn>',lambda _e,k=key:logic.select(k),add='+')
-        traces.append((variable,variable.trace_add('write',lambda *_:logic.refresh())))
+        traces.append((variable,variable.trace_add('write',lambda *_:settings_changed())))
     def remove_traces(event):
         if event.widget is window:
+            if plan_job[0] is not None:
+                try:window.after_cancel(plan_job[0])
+                except tk.TclError:pass
             for variable,trace in traces:
                 try:variable.trace_remove('write',trace)
                 except tk.TclError:pass
@@ -82,9 +91,28 @@ def open_export_dialog(parent,parameters,apply_settings,*,get_parameters=None,in
     notebook.bind('<<NotebookTabChanged>>',show_group,add='+')
     if initial_tab in groups:notebook.select(groups[initial_tab][2])
     def read():return normalize_settings(dict(settings,**{k:float(v.get().split(' ·')[0]) for k,v in variables.items()}))
+    def refresh_plan():
+        plan_job[0]=None
+        try:plan_label.configure(text=plan_text(execution_plan(parameters,read())))
+        except (ValueError,tk.TclError) as exc:plan_label.configure(text='任务计划：'+str(exc))
+    def settings_changed():
+        logic.refresh()
+        if plan_job[0] is not None:window.after_cancel(plan_job[0])
+        plan_job[0]=window.after(180,refresh_plan)
     def put(value):
         for key,number in value.items():
             if key in variables:variables[key].set((str(int(number))+' · '+CHOICES[key][int(number)]) if key in CHOICES else f'{number:g}')
+    def choose_plan(scope):
+        try:
+            put(recommend_settings(parameters,read(),scope))
+            status.set('已设置任务范围与观察时间，点击“运行并导出对比报告”。未改变控制器、器件、开关步长或 FRA 分辨率；时序建议仍需实际稳态检查。')
+        except (ValueError,tk.TclError) as exc:messagebox.showerror('请检查仿真设置',str(exc),parent=window)
+    ttk.Label(actions,text='仿真任务',font=('',10,'bold')).pack(side='left',padx=(0,12))
+    ttk.Button(actions,text='快速预检（推荐）',command=lambda:choose_plan('quick')).pack(side='left',padx=(0,8))
+    ttk.Button(actions,text='完整对比',command=lambda:choose_plan('full')).pack(side='left',padx=(0,8))
+    ttk.Button(actions,text='仅建议观察时间',command=lambda:choose_plan(None)).pack(side='left')
+    planbar.bind('<Configure>',lambda e:plan_label.configure(wraplength=max(480,e.width-35)))
+    refresh_plan()
     def apply_only():
         try:
             apply_settings(read())
@@ -112,7 +140,7 @@ def open_export_dialog(parent,parameters,apply_settings,*,get_parameters=None,in
         ttk.Label(toolbar,text='Coss / Cj 请在左侧“寄生参数与吸收”统一修改',style='Muted.TLabel').pack(side='left')
     from spice_runtime import find_ltspice,set_ltspice
     executable=tk.StringVar(value=find_ltspice() or '尚未检测到 LTspice')
-    runtime=ttk.Frame(window,padding=(14,0));runtime.grid(row=3,column=0,sticky='ew')
+    runtime=ttk.Frame(window,padding=(14,0));runtime.grid(row=4,column=0,sticky='ew')
     ttk.Label(runtime,textvariable=executable,wraplength=830).pack(side='left',fill='x',expand=True)
     def choose():
         filename=filedialog.askopenfilename(parent=window,title='选择 LTspice.exe',filetypes=[('LTspice 程序','*.exe')])
@@ -120,9 +148,9 @@ def open_export_dialog(parent,parameters,apply_settings,*,get_parameters=None,in
         try:set_ltspice(filename);executable.set(filename)
         except ValueError as exc:messagebox.showerror('LTspice 路径',str(exc),parent=window)
     ttk.Button(runtime,text='选择 LTspice.exe…',command=choose).pack(side='right')
-    ttk.Label(window,text=('单路无交叉调整率。默认快速闭环不验证结电容尖峰；LM5022 限流包含斜坡。Boost 关闭 MOS 不会切断输入至输出的短路通路。' if noniso else 'QR：f_sw 为设计频率上限；ZCD 决定实际周期。异常 CS 锁存至 VCC 欠压；理想供电不模拟自动打嗝。' if qr else 'Vcs 为原始采样端阈值，实际峰值含消隐与延时超调。保护后重启会复位软启动；340 ms 打嗝若超过观察时间，不宣称已观察到重启。'),wraplength=1040).grid(row=4,column=0,sticky='w',padx=14,pady=8)
+    ttk.Label(window,text=('单路无交叉调整率。默认快速闭环不验证结电容尖峰；LM5022 限流包含斜坡。Boost 关闭 MOS 不会切断输入至输出的短路通路。' if noniso else 'QR：f_sw 为设计频率上限；ZCD 决定实际周期。异常 CS 锁存至 VCC 欠压；理想供电不模拟自动打嗝。' if qr else 'Vcs 为原始采样端阈值，实际峰值含消隐与延时超调。保护后重启会复位软启动；340 ms 打嗝若超过观察时间，不宣称已观察到重启。'),wraplength=1040).grid(row=5,column=0,sticky='w',padx=14,pady=6)
     status=tk.StringVar(value='已加载示例时可直接导出。仅导出 ASC 工程不运行仿真；运行对比报告会依次仿真输入端点及 FRA，可取消。')
-    bar=ttk.Frame(window,padding=14);bar.grid(row=5,column=0,sticky='ew')
+    bar=ttk.Frame(window,padding=14);bar.grid(row=6,column=0,sticky='ew')
     ttk.Label(bar,textvariable=status,wraplength=490).pack(side='left',fill='x',expand=True)
     cancellation=threading.Event()
     def start(compare=False):

@@ -53,6 +53,7 @@ export interface Bootstrap {
   examples: Record<string, string>;
   cores: Record<string, Spec>;
   materials: Record<string, Spec>;
+  permeability_materials?: Record<string, Spec>;
   core_shapes: Record<string, string[]>;
   coupling: Record<string, Spec>;
   output_template: Spec;

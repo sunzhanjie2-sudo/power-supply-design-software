@@ -59,6 +59,7 @@ matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei',
                                           'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
+import copy
 import json
 import queue
 import tkinter as tk
@@ -87,7 +88,7 @@ from parameter_panel import ParameterPanelUI
 from multi_output_results import MultiOutputResultsUI
 from calculation_scheduler import (LatestCalculationWorker, calculate_efficiency_curve,
                                    calculate_report_efficiency_curve, calculate_optimization,
-                                   parameter_signature)
+                                   parameter_signature, CalculationCancelled)
 from winding_ui import WindingUI
 
 # ----------------------------------------------------------------------------
@@ -298,10 +299,10 @@ import capripple as capr
 import magnetics as mag
 from plants import (BuckConverter, BoostConverter, BuckBoostConverter,
                     FlybackConverter, ActiveClampForwardConverter,
-                    make_compensator,
+                    make_compensator, uses_dcm_peak_energy,
                     normalize_controller_type, resolve_controller_type)
 
-APP_VERSION = 'V0.0.0 · 20261031 图表DPI与B轴修正版'
+APP_VERSION = 'V0.0.0 · 20261108 QR多路交叉调整率'
 
 
 def _subplots(nrows=1, ncols=1, figsize=(6.4, 4.8)):
@@ -422,6 +423,13 @@ def _calculate_input_report(request, cancelled):
     return prepare_endpoint_bundle(request['p'], cancelled=cancelled)
 
 
+def _calculate_acceptance_endpoints(request, cancelled):
+    """Reuse fixed-hardware endpoints without report-only efficiency scans."""
+    from design_engine.service import prepare_endpoint_bundle
+    return prepare_endpoint_bundle(request['p'], cancelled=cancelled,
+                                   include_cross_regulation=False, include_efficiency=False)
+
+
 # ----------------------------------------------------------------------------
 # Parameter table: (key, label, unit options, section)  — bilingual labels
 # ----------------------------------------------------------------------------
@@ -492,9 +500,14 @@ PARAM_SPECS = [
     ('Vgs',      'Gate drive voltage, V (栅极驱动电压)', ['', 'm'], 'device'),
     ('ma_slope', 'Slope compensation ma, A/s (斜坡补偿, 原边电感电流斜率)', ['k'], 'device'),
     # magnetics
+    ('inductor_dcr', '成品电感 DCR', ['m', ''], 'mag'),
+    ('inductor_rated_current', '成品电感额定 RMS 电流', ['', 'm'], 'mag'),
+    ('inductor_saturation_current', '成品电感饱和电流', ['', 'm'], 'mag'),
+    ('inductor_extra_loss', '成品电感附加损耗', ['', 'm'], 'mag'),
     ('Bmax', 'Max flux density Bmax, T (设计最大磁通密度)', [], 'mag'),
     ('Bsat', 'Saturation flux Bsat, T (饱和磁密)',        [], 'mag'),
     ('Ku',    'Window fill factor Ku (窗口填充系数)',     [], 'mag'),
+    ('mu_r', '磁材相对磁导率（0=材料预设）', [], 'mag'),
     ('rho',   'Wire resistivity rho, Ohm*m (导线电阻率)', [], 'mag'),
     ('Rth_transformer', 'Transformer to ambient Ri-a, K/W (变压器至环境热阻)', [], 'mag'),
     ('h_conv', 'Inductor convection coeff h, W/m^2K (电感对流系数)', [], 'mag'),
@@ -509,6 +522,8 @@ PARAM_SPECS = [
     ('d_wire_s', 'Secondary wire dia, mm (副边线径, 0=auto)', ['m'], 'mag'),
     ('n_strand_p', 'Primary parallel strands (原边并绕数)', [], 'mag'),
     ('n_strand_s', 'Secondary parallel strands (副边并绕数)', [], 'mag'),
+    ('parallel_wires_p', '原边线圈并绕数（相同整根线）', [], 'mag'),
+    ('parallel_wires_s', '副边线圈并绕数（相同整根线）', [], 'mag'),
     # controller
     ('KP',   'Controller KP (控制器增益)',               [], 'ctrl'),
     ('fz1',  'Zero fz1, Hz (零点)',                      ['', 'k', 'M'], 'ctrl'),
@@ -624,6 +639,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self.update_delay = 450
         self._calculation_worker = LatestCalculationWorker(cache_size=3)
         self._calculation_poll_job = None
+        self._design_ready_job = None
         self._eff_curve_signature = None
         self._eff_curve_result = None
         self._export_after_calculation = False
@@ -645,6 +661,10 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self._component_management = {}
         self._spice_config = {}
         self._parasitic_config = {}
+        self._engineering_acceptance = {}
+        self._acceptance_range_result = None
+        self._acceptance_evidence_reference = None
+        self._acceptance_evidence_cache = None
         self._rendered_tabs = set()  # notebook indexes matching _last
 
         self.params = {}
@@ -804,7 +824,8 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self._work_cancel.set()
         for job in (self.update_timer, self._font_timer,
                     self._initial_update_job, self._control_warmup_job, self._control_poll_job, self._work_poll,
-                    self._param_layout_job, self._calculation_poll_job):
+                    self._param_layout_job, self._calculation_poll_job,
+                    getattr(self, '_design_ready_job', None)):
             if job is not None:
                 try:
                     self.root.after_cancel(job)
@@ -832,6 +853,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self.params['controller_type'] = tk.StringVar(value='auto')
         self.params['input_voltage_case'] = tk.StringVar(value='min')
         self.params['core_choice'] = tk.StringVar(value='auto')
+        self.params['inductor_design_enabled'] = tk.BooleanVar(value=True)
         # Shared clamp variables are created before the left-side editor;
         # the right-side clamp page now contains results only.
         self.rcd_K = tk.DoubleVar(value=0.95)
@@ -942,6 +964,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         p['component_management']=__import__('copy').deepcopy(self._component_management)
         p['spice_config']=__import__('copy').deepcopy(self._spice_config)
         p['parasitic_config']=__import__('copy').deepcopy(self._parasitic_config)
+        p['engineering_acceptance']=copy.deepcopy(self._engineering_acceptance)
         p.update(self._capacitor_parameters())
         for key in ('Rd_diode','Rd_din','Rd_dout'):p[key]=0.
         p['mos_manual_events']=self._manual_events_value() if self._mos_resolved_mode()=='manual' else {}
@@ -950,6 +973,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         p['topology'] = self._topo_key()
         p['control_mode'] = self._ctrl_key()
         p['controller_type'] = normalize_controller_type(self.params['controller_type'].get())
+        p['inductor_design_enabled'] = self.params['inductor_design_enabled'].get()
         p['cin2_enable'] = self.params.get('cin2_enable', tk.BooleanVar(value=False)).get()
         p['cout2_enable'] = self.params.get('cout2_enable', tk.BooleanVar(value=False)).get()
         p['d_in_enable'] = self.params.get('d_in_enable', tk.BooleanVar(value=False)).get()
@@ -969,6 +993,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
             p['core_choice_L'] = 'auto'
         p['core_shape'] = self.params.get('core_shape',
                                           tk.StringVar(value='auto')).get()
+        p['core_material'] = self.params['core_material'].get()
         p.update(self._custom_core_parameters())
         p.update(target_eta=self.params['target_eta'].get(),
                  fc_target=self.get_param('fc_target'),
@@ -1000,10 +1025,12 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         banner.columnconfigure(0,weight=1)
         export_button=ttk.Menubutton(actions,text='导出报告 ▾',style='Banner.TButton')
         export_menu=tk.Menu(export_button,tearoff=False)
+        export_menu.add_command(label='电磁仿真，电路仿真，设计计算联合报告…',command=self._export_joint_ui)
+        export_menu.add_separator()
         export_menu.add_command(label='设计报告 · Word / Excel / Markdown',command=self._export_report_ui)
         export_menu.add_command(label='仿真与设计计算对比报告 · Word + 工程 ZIP',command=lambda:self._export_spice_ui(comparison=True))
         export_menu.add_separator()
-        export_menu.add_command(label='LTspice 控制器设置与 ASC 导出',command=self._export_spice_ui)
+        export_menu.add_command(label='仿真与报告中心 · 设置 / 单项导出',command=self._export_joint_ui)
         export_button.configure(menu=export_menu);export_button.pack(side='right',padx=(8,0))
         ttk.Button(actions, text='重新计算', style='Banner.TButton',
                    command=self.request_update).pack(side='right', padx=(8, 0))
@@ -1086,20 +1113,27 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         filemenu.add_command(label='打开配置 (Open Config)', command=self.load_config)
         filemenu.add_command(label='导出设计报告 (Word / Excel)',
                              command=self._export_report_ui)
+        filemenu.add_command(label='电磁仿真，电路仿真，设计计算联合报告…', command=self._export_joint_ui)
         filemenu.add_command(label='LTspice 电源闭环 · 配置与导出', command=self._export_spice_ui)
         filemenu.add_command(label='仿真与设计计算对比报告 (Word)',command=lambda:self._export_spice_ui(comparison=True))
-        from example_catalog import EXAMPLES
-        for filename, label in EXAMPLES.items():
-            filemenu.add_command(label='示例: '+label,
-                                 command=lambda name=filename:self.load_isolated_example(name))
         filemenu.add_separator()
         filemenu.add_command(label='Exit (退出)', command=self.on_close)
         menubar.add_cascade(label='File (文件)', menu=filemenu)
+        examples = tk.Menu(menubar, tearoff=0)
+        from example_catalog import EXAMPLES
+        for filename, label in EXAMPLES.items():
+            examples.add_command(label=label, command=lambda name=filename:self.load_isolated_example(name))
+        menubar.add_cascade(label='示例', menu=examples)
+        automatic = tk.Menu(menubar, tearoff=0)
+        automatic.add_command(label='按规格生成初版（Buck / Boost / 反激）…', command=self.open_initial_design)
+        automatic.add_command(label='自动计算参数依据', command=self.open_auto_design_basis)
+        menubar.add_cascade(label='自动设计', menu=automatic)
         helpmenu = tk.Menu(menubar, tearoff=0)
         helpmenu.add_command(label='计算方法与公式说明',
                              command=self.open_calculation_reference)
         helpmenu.add_command(label='多路反激电源设计入门教程',
                              command=self.open_design_tutorial)
+        helpmenu.add_command(label='自动计算参数依据', command=self.open_auto_design_basis)
         menubar.add_cascade(label='Help (帮助)', menu=helpmenu)
         self.root.config(menu=menubar)
         self.root.bind('<Control-s>', lambda _e: self.save_config())
@@ -1172,6 +1206,108 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self.left_canvas.yview(*args)
 
     # ---------------------------------------------------------- config I/O
+    def _acceptance_apply(self, data):
+        """Save review metadata without running an electrical calculation."""
+        from engineering_acceptance import normalize
+        self._engineering_acceptance = normalize(data)
+        if self._last is not None:
+            wrapper = dict(self._last)
+            for key in ('p', 'calculation_params'):
+                if key in wrapper:
+                    wrapper[key] = dict(wrapper[key],
+                        engineering_acceptance=copy.deepcopy(self._engineering_acceptance))
+            self._last = wrapper
+        self._export_after_calculation = False
+        self.status_var.set('验收设置与记录已应用；保存工程可保留，电气结果无需重算。')
+
+    def _acceptance_get_range_result(self):
+        from engineering_acceptance import input_fingerprint
+        current = self._current_spec()
+        cached = self._acceptance_range_result
+        if cached and input_fingerprint(cached['base_spec']) == input_fingerprint(current):
+            return cached
+        if self._snapshot_valid and self._last:
+            saved = self._last['p']
+            if input_fingerprint(saved) == input_fingerprint(current):
+                key = 'Vinmax' if saved.get('input_voltage_case') == 'max' else 'Vinmin'
+                return dict(base_spec=saved, fixed_hardware=False, cases=[
+                    dict(id=key, voltage=saved['V_in'], p=saved,
+                         result=self._last['res'], checks=self._last.get('checks', []))])
+        return cached
+
+    def _acceptance_get_joint_record(self):
+        """Resolve an explicitly retained local run record, not arbitrary logs."""
+        dialog = getattr(self, '_joint_simulation_dialog', None)
+        if dialog is not None and isinstance(getattr(dialog, 'result', None), dict):
+            live = dialog.result
+            if live.get('adopted_config'):
+                return live
+        history = getattr(self, '_joint_simulation', None) or {}
+        if history.get('adopted_config'):
+            return history
+        path = history.get('manifest_path')
+        if not path:
+            return history
+        from pathlib import Path
+        try:
+            source = Path(path)
+            if source.suffix.lower() != '.json' or not source.is_file() or source.stat().st_size > 32*1024*1024:
+                return history
+            marker = (str(source.resolve()), source.stat().st_mtime_ns, source.stat().st_size)
+            cached = getattr(self, '_acceptance_joint_record_cache', None)
+            if cached is None or cached[0] != marker:
+                from transformer_geometry import strict_json
+                record = strict_json(source.read_bytes())
+                if not isinstance(record, dict):
+                    return history
+                self._acceptance_joint_record_cache = (marker, record)
+            return self._acceptance_joint_record_cache[1]
+        except (OSError, ValueError, TypeError):
+            return history
+
+    def _acceptance_refresh_endpoints(self):
+        try:
+            request = dict(p=copy.deepcopy(self._current_spec()))
+            self._calculation_worker.submit('acceptance_endpoints', request,
+                _calculate_acceptance_endpoints, cache=True)
+            self.status_var.set('正在后台刷新验收 Vinmin / Vinmax；未启动电磁或电路仿真。')
+            self._ensure_calculation_poll()
+        except Exception as exc:
+            messagebox.showerror('工程验证与验收', str(exc), parent=self.root)
+
+    def _acceptance_get_spice_evidence(self):
+        reference = self._acceptance_evidence_reference
+        if not reference:
+            return None
+        from pathlib import Path
+        try:
+            source = Path(reference['path'])
+            stat = source.stat()
+            marker = (reference['path'], reference['payload_sha256'], stat.st_mtime_ns, stat.st_size)
+            cached = self._acceptance_evidence_cache
+            if cached is None or cached[0] != marker:
+                from acceptance_evidence_io import load_evidence
+                _, envelope = load_evidence(source, reference=reference)
+                self._acceptance_evidence_cache = (marker, envelope)
+            return self._acceptance_evidence_cache[1]
+        except (OSError, ValueError, KeyError) as exc:
+            return dict(source='证据引用不可用：'+str(exc), evidence_error=str(exc))
+
+    def _acceptance_import_evidence(self):
+        path = filedialog.askopenfilename(parent=self.root, title='导入电路比较或联合仿真证据',
+            filetypes=[('仿真证据 JSON / ZIP', '*.json *.zip')])
+        if not path:
+            return
+        try:
+            from acceptance_evidence_io import load_evidence
+            reference, _ = load_evidence(path)
+            self._acceptance_evidence_reference = reference
+            self._acceptance_evidence_cache = None
+            self.acceptance_panel.refresh()
+            self.status_var.set('仿真证据引用已导入；按当前硬件匹配判定，保存工程可保留引用。')
+        except (OSError, ValueError) as exc:
+            messagebox.showerror('导入验收证据', str(exc), parent=self.root)
+
     def _config_dict(self):
         """Serialisable dict of every UI parameter (value + unit)."""
         cfg = {}
@@ -1201,6 +1337,14 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                 except Exception:
                     pass
         cfg['__version__'] = MANUAL_VERSION
+        if getattr(self,'_auto_design_basis',None):
+            cfg['__auto_design_basis'] = copy.deepcopy(self._auto_design_basis)
+        if getattr(self, '_transformer_simulation', None):
+            cfg['__transformer_simulation'] = copy.deepcopy(self._transformer_simulation)
+        if getattr(self, '_joint_simulation', None):
+            cfg['__joint_simulation'] = copy.deepcopy(self._joint_simulation)
+        if self._acceptance_evidence_reference:
+            cfg['__acceptance_evidence'] = copy.deepcopy(self._acceptance_evidence_reference)
         cfg['mos_miller_curve']=__import__('copy').deepcopy(self._mos_miller_curve)
         cfg['mos_charge_curve']=__import__('copy').deepcopy(self._mos_charge_curve)
         cfg['diode_curves']=__import__('copy').deepcopy(self._diode_curves)
@@ -1208,6 +1352,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         cfg['component_management']=__import__('copy').deepcopy(self._component_management)
         cfg['spice_config']=__import__('copy').deepcopy(self._spice_config)
         cfg['parasitic_config']=__import__('copy').deepcopy(self._parasitic_config)
+        cfg['engineering_acceptance']=copy.deepcopy(self._engineering_acceptance)
         cfg.update(self._capacitor_parameters())
         for key in ('Rd_diode','Rd_din','Rd_dout'):cfg[key]=dict(v=0.,u='')
         cfg['mos_manual_events']=self._manual_events_value(strict=False)
@@ -1268,6 +1413,9 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self._config_dict(), f, ensure_ascii=False, indent=2)
+            from pathlib import Path
+            if self._geometry_source is None:
+                self._geometry_source=(Path(path).name,Path(path).read_bytes())
             self.status_var.set(f'配置已保存: {os.path.basename(path)}')
         except Exception as e:
             messagebox.showerror('Save config', str(e))
@@ -1310,6 +1458,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         report_params.update(target_eta=self.params['target_eta'].get(),
                              fc_target=self.get_param('fc_target'),
                              pm_target=self.params['pm_target'].get())
+        report_params['engineering_acceptance'] = copy.deepcopy(self._engineering_acceptance)
         return report_params
 
     def export_report(self, recompute=True, efficiency_curve=None, range_result=None):
@@ -1348,6 +1497,8 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                 # Explicit synchronous API/batch callers retain their behavior;
                 # all GUI buttons prepare this data through the worker first.
                 range_result = _calculate_input_report(dict(p=report_params), lambda: False)
+            range_result = dict(range_result,
+                engineering_acceptance_evidence=self._acceptance_get_spice_evidence())
             for case in range_result['cases']:
                 if case.get('p') is not None:
                     changed = [key for key in ('target_eta', 'fc_target', 'pm_target', 'winding_config')
@@ -1404,9 +1555,17 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
 
     def _apply_config(self, cfg):
         """Apply a loaded config dict (value + unit) to the UI parameters."""
+        self._geometry_source=None
         cfg = dict(cfg)
+        from inductor_selection import DEFAULTS as INDUCTOR_DEFAULTS
+        for key, default in INDUCTOR_DEFAULTS.items():
+            cfg.setdefault(key, default)
         from component_management import normalize_management
         component_data = normalize_management(cfg.get('component_management'))
+        from engineering_acceptance import normalize as normalize_acceptance
+        acceptance_data = normalize_acceptance(cfg.get('engineering_acceptance'))
+        from acceptance_evidence_io import normalize_reference
+        acceptance_reference = normalize_reference(cfg.get('__acceptance_evidence'))
         from spice_export import normalize_settings
         spice_data = normalize_settings(cfg.get('spice_config'))
         from parasitics import normalize as normalize_parasitics
@@ -1439,8 +1598,15 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self._diode_curves=diode_data
         self._device_curve_settings=source_settings
         self._component_management=component_data
+        self._engineering_acceptance=acceptance_data
+        self._acceptance_range_result=None
+        self._acceptance_evidence_reference=acceptance_reference
+        self._acceptance_evidence_cache=None
         self._spice_config=spice_data
         self._parasitic_config=parasitic_data
+        self._auto_design_basis=copy.deepcopy(cfg.get('__auto_design_basis'))
+        self._transformer_simulation = copy.deepcopy(cfg.get('__transformer_simulation'))
+        self._joint_simulation = copy.deepcopy(cfg.get('__joint_simulation'))
         if hasattr(self,'component_manager'):
             self.component_manager.current=None  # a new design must not inherit unapplied edits
         self._load_manual_events(cfg)
@@ -1508,9 +1674,11 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         if not path:
             return
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
+            from pathlib import Path
+            raw=Path(path).read_bytes()
+            cfg=json.loads(raw.decode('utf-8-sig'))
             self._apply_config(cfg)
+            self._geometry_source=(Path(path).name,raw)
             self.status_var.set(f'配置已加载: {os.path.basename(path)}')
         except Exception as e:
             messagebox.showerror('Load config', str(e))
@@ -1557,6 +1725,14 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
     def open_design_tutorial(self):
         """Open the separate worked-example tutorial without regenerating it."""
         self._open_help_document('多路反激电源设计入门教程.docx', '入门教程')
+
+    def open_initial_design(self):
+        from initial_design_ui import show
+        return show(self)
+
+    def open_auto_design_basis(self):
+        from design_engine.sizing_basis import DOCUMENT
+        self._open_help_document(DOCUMENT, '自动计算参数依据')
 
     def _open_help_document(self, name, title):
         candidates = [os.path.join(os.path.dirname(sys.executable), name),
@@ -1708,6 +1884,10 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                 self.mag_nb.select(self.tab_mag_design)
             self.mag_nb.tab(self.tab_mag_winding,
                             state='normal' if winding_supported else 'hidden')
+            if winding_supported:
+                self.mag_simulation_button.pack(side='right', padx=5)
+            else:
+                self.mag_simulation_button.pack_forget()
         pfm = bool(self._psr_active() and self._snapshot_valid and self._last
                    and self._last['p'].get('feedback_mode') == 'PSR-MP6005'
                    and self._last['op'].get('regulation_region') == 'PFM-estimate')
@@ -1793,6 +1973,10 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         """UI entry: Tk reads inputs; the numerical worker never sees widgets."""
         if self._closing:
             return False
+        ready_job = getattr(self, '_design_ready_job', None)
+        if ready_job is not None:
+            self.root.after_cancel(ready_job)
+            self._design_ready_job = None
         self._mark_cross_regulation_stale()
         self._mark_mos_gate_stale()
         if not preserve_export:
@@ -1806,8 +1990,29 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
             self._snapshot_valid = False
             self._mark_winding_stale()
             from input_voltage_range import calculate_input_operating_point
+            import threading
+            ready = threading.Event()
+            if self._param_layout_job is not None:
+                # Finish the current input-panel reflow before a CPU-heavy
+                # worker competes with thousands of Tcl geometry callbacks.
+                # Never run update()/update_idletasks() recursively here.
+                def allow_calculation():
+                    self._design_ready_job = None
+                    ready.set()
+                def after_layout():
+                    self._design_ready_job = self.root.after(40, allow_calculation)
+                self._design_ready_job = self.root.after_idle(after_layout)
+            else:
+                ready.set()
+
+            def calculate(snapshot, cancelled):
+                while not ready.wait(.02):
+                    if cancelled():
+                        raise CalculationCancelled()
+                return calculate_input_operating_point(snapshot, cancelled=cancelled)
+
             self._calculation_worker.submit('design', p,
-                lambda snapshot, cancelled: calculate_input_operating_point(snapshot, cancelled=cancelled), cache=True)
+                calculate, cache=True)
             self.status_var.set('正在后台计算设计… 可继续编辑；仅应用最新参数的结果。')
             self._ensure_calculation_poll()
             return True
@@ -1836,6 +2041,15 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                                          calculation_params=result.value['p'])
                     if self._export_after_calculation:
                         self._queue_report_efficiency_curve()
+                elif result.kind == 'acceptance_endpoints':
+                    from engineering_acceptance import input_fingerprint
+                    if result.error is not None:
+                        self.status_var.set('验收两端计算失败：'+str(result.error))
+                    elif input_fingerprint(result.parameters['p']) == input_fingerprint(self._current_spec()):
+                        self._acceptance_range_result = result.value
+                        self.status_var.set('验收两端计算已更新；仿真和实测仍按各自证据判定。')
+                    if hasattr(self, 'acceptance_panel'):
+                        self.acceptance_panel.refresh()
                 elif result.kind == 'report_input_range':
                     if not self._export_after_calculation:
                         continue
@@ -1990,8 +2204,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                     f"{'✓ f_sw ≤ f_max' if f_ok else '⚠ f_sw 超 f_max 限制!'}  "
                     f"η={res['eta'] * 100:.1f}% (模型估算, 未计附加损耗)")
             else:
-                dcm_note = '  [DCM: 环路采用低频单极点近似模型]' \
-                    if op['mode'] == 'DCM' else ''
+                dcm_note = '  [DCM · 环路工作条件见环路页]' if op['mode'] == 'DCM' else ''
                 self.status_var.set(
                     f"{topo_label}: D={op['D']:.3f}  mode={op['mode']}  "
                     f"dI_L={fmt_eng(op['dI_L'], 'A')}  I_L_pk={fmt_eng(op['I_L_pk'], 'A')}  "
@@ -2004,6 +2217,11 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
             # Skipped while the lazy `control` import has not finished (the
             # background warm-up or the first ④ visit fills them in).
             calculation_params = calculation_params or p
+            # Review records do not change the electrical solve. Keep the
+            # published wrapper current without mutating cached input dicts.
+            p = dict(p, engineering_acceptance=copy.deepcopy(self._engineering_acceptance))
+            calculation_params = dict(calculation_params,
+                engineering_acceptance=copy.deepcopy(self._engineering_acceptance))
             self._last = dict(op=op, wf=wf, res=res, p=p, calculation_params=calculation_params)
             self._prune_output_result_cards(res)
             self._update_isolated_results(calculation_params,res)
@@ -2049,7 +2267,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
     # ============================================================ ① topology
     def _build_topology_tab(self):
         f = self._build_isolated_controls(self.tab_topology)
-        ttk.Button(f, text='LTspice 通用电源闭环 · 配置与导出…', command=self._export_spice_ui).pack(anchor='e',padx=8,pady=4)
+        ttk.Button(f, text='仿真与报告中心 · 变压器 / 控制器 / 联合导出…', command=self._export_joint_ui).pack(anchor='e',padx=8,pady=4)
         from component_ui import ComponentManager
         component_page = ttk.Frame(self._isolated_result_book)
         self._component_page = component_page
@@ -2095,10 +2313,27 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         self._refresh_components()
 
     def _component_context(self):
+        if self._snapshot_valid and self._last:
+            # The table is a view of the published electrical snapshot. Reading
+            # hundreds of live Tk fields here competes with the numerical
+            # worker for the GIL and can stall a notebook change for seconds.
+            p = dict(self._last.get('calculation_params', self._last['p']),
+                     component_management=copy.deepcopy(self._component_management))
+            return p, self._last['res']
         p = self.get_params(check_curve_sources=False)
         p.update(self._rcd_parameters())
         res = self._last['res'] if self._snapshot_valid and self._last else None
         return p, res
+
+    def _export_joint_ui(self):
+        """One entry for transformer extraction, circuit setup and joint export."""
+        try:
+            if self._topo_key() not in ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD'):
+                return self._export_spice_ui()
+            from joint_simulation_ui import show
+            return show(self)
+        except Exception as exc:
+            messagebox.showerror('仿真与报告中心',str(exc),parent=self.root)
 
     def _export_spice_ui(self,comparison=False):
         try:
@@ -2117,6 +2352,11 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
 
     def _refresh_components(self):
         if hasattr(self, 'component_manager'):
+            if not self._snapshot_valid:
+                # A tab-change event may arrive while loading/solving a design.
+                # Do not reread partially edited inputs or show stale verdicts.
+                self.component_manager.mark_stale()
+                return
             try: self.component_manager.refresh()
             except (ValueError, tk.TclError): pass  # unfinished electrical inputs; no fake passing result
 
@@ -2497,32 +2737,53 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
         f = self.tab_mag_design
         top = ttk.Frame(f, style='Guide.TFrame', padding='8 4')
         top.pack(fill='x', pady=(2, 4))
+        self.mag_simulation_button = ttk.Button(top, text='仿真与报告中心…',
+                                              command=self._export_joint_ui)
+        self.mag_simulation_button.pack(side='right', padx=5)
         self.guide_mag = ttk.Label(top, text=STEP_GUIDE[2],
                                    style='Guide.TLabel')
         self.guide_mag.pack(side='left')
 
-        body = ttk.Frame(f)
+        body = ttk.Panedwindow(f, orient='horizontal')
         body.pack(fill='both', expand=True)
+        plot = ttk.Frame(body, width=620)
+        right = ttk.Frame(body, width=460)
+        plot.pack_propagate(False)
+        right.pack_propagate(False)
+        body.add(plot, weight=3)
+        body.add(right, weight=2)
+        def initial_split(event):
+            if event.width > 400 and body.winfo_ismapped():
+                body.sashpos(0, int(event.width * .52))
+                body.unbind('<Configure>', split_binding)
+        split_binding = body.bind('<Configure>', initial_split, add='+')
         self.fig_mag, (self.ax_mag_b, self.ax_mag_loss) = _subplots(
             2, 1, figsize=(6.0, 6.0))
         self.fig_mag.set_layout_engine('constrained')
-        self.canvas_mag = FigureCanvasTkAgg(self.fig_mag, master=body)
-        self.canvas_mag.get_tk_widget().pack(side='left', fill='both', expand=True)
-        right = ttk.Frame(body)
-        right.pack(side='right', fill='y', padx=4)
-        ttk.Label(right, text='Magnetic design report (磁件设计报告)').pack(anchor='w')
-        self.mag_text = tk.Text(right, width=40, height=20, font=('Consolas', 10))
-        self.mag_text.pack(fill='both', expand=True)
+        self.canvas_mag = FigureCanvasTkAgg(self.fig_mag, master=plot)
+        self.canvas_mag.get_tk_widget().pack(fill='both', expand=True)
+        from magnetic_report_ui import MagneticReport
+        self.mag_report = MagneticReport(right)
+        self.mag_report.pack(fill='both', expand=True)
+        self.mag_text = self.mag_report
         self.mag_check = tk.StringVar(value='')
-        ttk.Label(f, textvariable=self.mag_check, foreground=BAD,
-                  wraplength=1500, justify='left').pack(fill='x', pady=3)
+
+    def _set_magnetic_report(self, p, res):
+        from magnetic_report_view import build_report
+        view = build_report(p, res)
+        self.mag_report.render(view)
+        self.mag_check.set(view['summary'])
+        xf = (res.get('mag') or {}).get('transformer') or {}
+        if hasattr(self, 'transformer_gap_readout') and xf.get('gap_design'):
+            from transformer_gap import summary
+            self.transformer_gap_readout.set(summary(xf['gap_design']))
 
     def _b_waveforms(self, op, wf, res):
         """B(t) waveforms of the designed magnetic device(s)."""
         md = res.get('mag') or {}
         out = []
         ind = md.get('inductor')
-        if ind and ind.get('ok'):
+        if ind and ind.get('ok') and ind.get('design_enabled') is not False:
             N, Ae = ind['N'], ind['Ae']
             L, i = op['L'], wf['iL']
             out.append(dict(name='电感 (L)', t=wf['t'], B=L * i / (N * Ae),
@@ -2543,10 +2804,25 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
     def _update_mag(self, op, p, res, wf):
         try:
             md = res.get('mag') or {}
+            ind = md.get('inductor') or {}
+            if ind.get('design_enabled') is False:
+                self.ax_mag_b.clear(); self.ax_mag_loss.clear()
+                self.ax_mag_b.set_axis_off()
+                self.ax_mag_b.text(.5, .56, '外购成品电感 · 不进行磁芯与绕组设计',
+                    transform=self.ax_mag_b.transAxes, ha='center', va='center', fontsize=12)
+                self.ax_mag_b.text(.5, .36, 'L 仍用于工作点、波形与环路；磁密和温升未评估',
+                    transform=self.ax_mag_b.transAxes, ha='center', va='center', fontsize=10)
+                _loss_bars(self.ax_mag_loss, ['直流铜损', '用户附加损耗'], [ind['P_cu'], ind['P_extra']],
+                           '成品电感已计入的损耗', ['#1558b0','#8e44ad'])
+                _draw_canvas(self.canvas_mag)
+                self._set_magnetic_report(p, res)
+                self._update_winding(op, p, res)
+                return
             Bsat = p['Bsat']
             ax_b, ax_loss = self.ax_mag_b, self.ax_mag_loss
             ax_b.clear()
             ax_loss.clear()
+            ax_b.set_axis_on()
 
             devices = self._b_waveforms(op, wf, res)
             colors = ['#1558b0', '#8e44ad', '#c0392b']
@@ -2580,82 +2856,7 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                            ['#1558b0','#8e44ad']*len(parts))
             _draw_canvas(self.canvas_mag)
 
-            # report text
-            self.mag_text.delete('1.0', 'end')
-            lines = []
-            warns = []
-            if md.get('inductor') and md['inductor'].get('ok'):
-                ind = md['inductor']
-                B_pk = ind['B_pk']
-                sat_ok = B_pk < Bsat
-                dT = ind.get('dT', 0.0)
-                th_ok = dT <= p['temp_rise_limit']
-                lines += [
-                    '== Inductor, L (电感) ==',
-                    f"core (磁芯)  : {ind['core_label']}  (Ap req {ind['ap'] * 1e9:.1f} mm^4)",
-                    f"turns (匝数) : {ind['N']}   gap (气隙) {ind['gap'] * 1e6:.0f} um",
-                    f"wire (线径)  : {ind['d_wire'] * 1e3:.2f} mm  (J {ind['J_actual'] / 1e6:.2f} A/mm^2)",
-                    f"MLT (每圈平均长度) : {ind['MLT'] * 1e3:.1f} mm  "
-                    f"({ind['MLT_source']})",
-                    f"R_dc = ρ·MLT·N/(并绕·A) : {ind['R_dc'] * 1e3:.1f} mOhm  Rac/Rdc {ind['Fr']:.2f}",
-                    f"Bpk (峰值磁密) : {B_pk * 1e3:.0f} mT   Bsat = {Bsat * 1e3:.0f} mT",
-                    f"饱和裕量 (saturation margin) : {(1 - B_pk / max(Bsat, 1e-30)) * 100:.0f} %  "
-                    f"{'OK' if sat_ok else '!! 饱和 !! 增大磁芯/减小 Bmax/加匝数'}",
-                    f"P_core (磁芯损耗, NSE) : {ind['P_core']:.3f} W   P_cu (铜损) {ind['P_cu']:.3f} W",
-                    f"fill (窗口填充) : {ind['fill'] * 100:.0f} %",
-                    f"温升 ΔT ≈ {dT:.1f} K  (h = {ind.get('h_conv', p['h_conv']):.0f} W/m^2K, "
-                    f"A_surf ≈ {ind.get('A_surf', 0) * 1e4:.1f} cm^2)  "
-                    f"{'OK' if th_ok else '!! 过热 !!'} (阈值 {p['temp_rise_limit']:g} K)",
-                ]
-                if not sat_ok:
-                    warns.append('电感饱和!')
-                if not th_ok:
-                    warns.append(f"电感温升超 {p['temp_rise_limit']:g} K!")
-            if md.get('transformer') and md['transformer'].get('ok'):
-                xf = md['transformer']
-                B_pk = xf['B_pk']
-                sat_ok = B_pk < Bsat
-                margin = (Bsat - B_pk) / max(Bsat, 1e-30)
-                dT = xf.get('dT', 0.0)
-                th_ok = dT <= p['temp_rise_limit']
-                lines += [
-                    '',
-                    '== Transformer (变压器) ==',
-                    f"core (磁芯)  : {xf['core_label']}",
-                    f"turns (匝数) : Np {xf['Np']} / Ns {xf['Ns']}"
-                    + ("  (用户输入)" if p['Np'] > 0 else f"  (自动 Np, Bpk 由该 Np 计算)"),
-                    f"wire (线径×并绕) : p {xf['d_wire_p'] * 1e3:.2f} mm ×{xf['n_strand_p']}  /  "
-                    f"s {xf['d_wire_s'] * 1e3:.2f} mm ×{xf['n_strand_s']}"
-                    + ("  (用户输入)" if p['d_wire_p'] > 0 else "  (按目标 J 自动)"),
-                    f"I_rms (有效值) : p {xf['I_rms_p']:.2f} / s {xf['I_rms_s']:.2f} A",
-                    f"J (由线径×并绕与 I_rms 导出) : p {xf['J_actual_p'] / 1e6:.2f} / "
-                    f"s {xf['J_actual_s'] / 1e6:.2f} A/mm^2",
-                    f"MLT (每圈平均长度) : {xf['MLT'] * 1e3:.1f} mm  "
-                    f"({xf['MLT_source']})",
-                    f"R_dc = ρ·MLT·N/(并绕·A) : p {xf['R_dc_p'] * 1e3:.1f} mOhm / s {xf['R_dc_s'] * 1e3:.1f} mOhm",
-                    f"{'Bpk = ΔB/2 (双极性复位)' if op['topology'] == 'ACF-FORWARD' else 'Bpk = Lm·Ipk/(Np·Ae)'} : {B_pk * 1e3:.0f} mT   Bsat = {Bsat * 1e3:.0f} mT",
-                    f"饱和裕量 (saturation margin) : {margin * 100:.0f} %  "
-                    f"{'OK' if sat_ok else '!! 饱和 !!'}",
-                    f"P_core (磁芯损耗, NSE 方波) : {xf['P_core']:.3f} W   P_cu (铜损) {xf['P_cu']:.3f} W",
-                    f"fill (窗口填充) : {xf['fill'] * 100:.0f} %",
-                    f"温升 ΔT = (P_cu+P_core) × Ri-a ≈ {dT:.1f} K  "
-                    f"(用户热阻 {xf['Rth_transformer']:.3g} K/W)  "
-                    f"{'OK' if th_ok else '!! 过热 !!'} (阈值 {p['temp_rise_limit']:g} K)",
-                ]
-                if not sat_ok:
-                    warns.append('变压器饱和!')
-                if not th_ok:
-                    warns.append(f"变压器温升超 {p['temp_rise_limit']:g} K!")
-            if not lines:
-                lines = [md.get('reason', 'no magnetics computed (未计算磁件 — 检查 Bmax/J/Ku)')]
-            _hdr = ('磁损单位约定: Pv[mW/cm³] = k·(f_sw/kHz)^α·B[T]^β  '
-                    '(f_sw: kHz; 磁通密度 B/ΔB: T; Pv: mW/cm³)\n'
-                    + '-' * 52 + '\n')
-            self.mag_text.insert('1.0', _hdr + '\n'.join(lines))
-            self.mag_check.set(
-                '   |   '.join(warns) if warns else
-                f'饱和与温升检查: Bpk < Bsat (Bsat={Bsat * 1e3:.0f} mT), '
-                f"ΔT ≤ {p['temp_rise_limit']:g} K — 全部通过 ✓")
+            self._set_magnetic_report(p, res)
             self._update_winding(op, p, res)
         except Exception as e:
             import traceback
@@ -2937,11 +3138,11 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                     note += f" 有效频带 ≤{model['frequency_limit']:.0f} Hz，建议 fc ≤{model['recommended_fc_max']:.0f} Hz。"
                 if not loop['closed_loop_stable']:
                     note += ' ⚠ 近似闭环含非稳定极点，不能仅凭 PM 判稳。'
-            if p.get('feedback_mode')=='PSR-MP6005':
+            if p.get('feedback_mode')=='PSR-MP6005' or uses_dcm_peak_energy(p,op):
                 note = self._last_plant.model_note
             if p['topology'] == 'ACF-FORWARD':
                 note = f"正激采用低频 Buck 派生模型，不含钳位完整动态。建议 fc ≤ {fmt_eng(op['fc_recommended_max'], 'Hz')}。"
-            if op['mode'] != 'CCM' and not op.get('coupled_solution'):
+            if op['mode'] != 'CCM' and not op.get('coupled_solution') and not uses_dcm_peak_energy(p,op):
                 note += ' 当前采用低频单极点 DCM 近似。'
             if fc is None:
                 note += ' 扫描范围内无下降穿越，不能用扫描末端作为 fc。'
@@ -3491,6 +3692,8 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
                 ev = compd.tl431_f_eval(
                     vin('CTR'), vin('Rpullup'), vin('Copto'), vin('R_LED'),
                     vin('R1'), vin('C1'), vin('R_pz'), vin('C_pz'), vin('C2'))
+            from compensation_report import opamp_command_scale
+            ev['KP'] *= opamp_command_scale(self.get_params(),key)
             if not ev['KP'] or not (ev['wz1'] > 0):
                 raise ValueError('阻容值无效: KP/fz1 无法计算')
             updates = compd.controller_updates(ev)
@@ -3734,6 +3937,9 @@ class PowerSupplyAnalyzer(WindingUI, IsolatedUI, ParameterPanelUI, MultiOutputRe
 
     def cancel_calculation(self):
         self._calculation_worker.invalidate()
+        if self._design_ready_job is not None:
+            self.root.after_cancel(self._design_ready_job)
+            self._design_ready_job = None
         if self.update_timer is not None:
             self.root.after_cancel(self.update_timer)
             self.update_timer = None

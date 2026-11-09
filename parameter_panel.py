@@ -20,7 +20,7 @@ OPTION_NAMES = {'cout2_enable': '启用输出第二电容', 'cin2_enable': '启�
                 'd_in_enable': '启用输入防反二极管', 'd_out_enable': '启用输出防反二极管'}
 OUTPUT_OWNED = {'V_out', 'P_out', 'C_out', 'Rc', 'ESL', 'C_out2', 'Rc2', 'ESL2',
                 'Vf_diode', 'Rd_diode', 'Qrr', 'Vf_dout', 'Rd_dout', 'ripple_target',
-                'Ns', 'd_wire_s', 'n_strand_s'}
+                'Ns', 'd_wire_s', 'n_strand_s','parallel_wires_s'}
 PSR_COMPATIBILITY = {'KP', 'fz1', 'fz2', 'fp1', 'fp2'}
 
 
@@ -176,12 +176,19 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
     def _multiple_active(self):
         return self._topo_key() in ISOLATED and self.multi_enabled.get()
 
+    def _purchased_inductor(self):
+        from inductor_selection import TOPOLOGIES
+        return self._topo_key() in TOPOLOGIES and not self.params['inductor_design_enabled'].get()
+
     def _output_owns_parameter(self, key):
         return self._multiple_active() and (key in OUTPUT_OWNED or (key == 'L' and self._topo_key() == 'ACF-FORWARD'))
 
     def _scalar_parameter_active(self, key):
         """Calculation ownership, independent of search/folding/basic mode."""
         if key in DEPRECATED_RD:return False
+        from inductor_selection import DESIGN_FIELDS, FIELDS
+        if self._purchased_inductor() and key in DESIGN_FIELDS:return False
+        if not self._purchased_inductor() and key in FIELDS:return False
         if key == 'MLT' and not self._standard_mlt_active():return False
         topo, mode = self._presentation_context()
         spec = META[key]
@@ -297,10 +304,17 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
                 row += 2
             row = self._build_output_parameter_rows(frame, row, section)
             if section == 'mag':
+                self.transformer_gap_readout = tk.StringVar(value='μr=0 跟随材料手册；有效磁路长度 le 自动取 Ve/Ae，结果见右侧磁件报告。')
+                gap_readout = ttk.Label(frame, textvariable=self.transformer_gap_readout,
+                                        style='Muted.TLabel', wraplength=350, justify='left')
+                gap_readout.grid(row=row, column=0, columnspan=4, sticky='ew', pady=4)
+                self._register_param_extra(frame, [gap_readout], ('mu_r',), '相对磁导率 有效磁路长度 气隙')
+                row += 1
                 note = ttk.Label(frame, text='磁损系数：Pv[mW/cm³] = k·(f/kHz)^α·B[T]^β。\n自动模式仍使用原引擎的 0=auto；不填虚构手动值。',
                                  style='Muted.TLabel', wraplength=350, justify='left')
                 note.grid(row=row, column=0, columnspan=4, sticky='w', pady=4)
-                self._register_param_extra(frame, [note], ('k_core', 'a_core', 'b_core'), '磁损系数 计算约定')
+                self._register_param_extra(frame, [note], ('k_core', 'a_core', 'b_core'), '磁损系数 计算约定',
+                                           predicate=lambda:not self._purchased_inductor())
                 row += 1
             rows[section] = row
         self._param_scheme_row = rows
@@ -308,6 +322,7 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
         # groups explicitly; filtering must never conceal a material model.
         for key in OPTION_NAMES:
             self.params[key].trace_add('write', lambda *_: self._filter_params())
+        self.params['inductor_design_enabled'].trace_add('write', lambda *_: self._parameter_context_changed())
         self.params['gfs'].trace_add('write', lambda *_: self._filter_params())
         self.params['mos_miller_mode'].trace_add('write', self._mos_mode_changed)
         self.params['mos_charge_mode'].trace_add('write', self._mos_mode_changed)
@@ -340,7 +355,7 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
             unit_label = ttk.Label(parent, textvariable=shown, style='Muted.TLabel', wraplength=78, justify='left')
             unit_label.grid(row=row, column=2, sticky='w', padx=4)
             widgets.append(unit_label)
-        density = key in ('d_wire_p', 'n_strand_p', 'd_wire_s', 'n_strand_s')
+        density = key in ('d_wire_p', 'n_strand_p', 'd_wire_s', 'n_strand_s','parallel_wires_p','parallel_wires_s')
         side = ttk.Frame(parent) if density else parent
         if density:
             side.grid(row=row, column=3, sticky='w', padx=(3, 0), pady=3)
@@ -453,15 +468,28 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
         return row
 
     def _build_core_picker_rows(self, frame, row):
+        from power_stage import DEFAULT_PARAMS
         self._init_custom_core_controls()
+        toggle = ttk.Checkbutton(frame, text='启用电感磁芯与绕组设计（取消＝外购成品电感）',
+                                 variable=self.params['inductor_design_enabled'])
+        toggle.grid(row=row, column=0, columnspan=4, sticky='w', pady=5)
+        self._register_param_extra(frame, [toggle], text='电感设计 一体成型 成品 外购',
+                                   predicate=lambda:self._topo_key() in ('BUCK','BOOST','BUCK-BOOST'))
+        row += 1
+        bought_note = ttk.Label(frame, text='外购成品电感：L 仍在②功率级中填写。下面按 DCR 计算直流铜损，额定电流可选填；0 表示未提供。未提供附加损耗时不含磁芯/交流损耗，不评估磁密与温升。',
+                                style='Muted.TLabel', wraplength=350, justify='left')
+        bought_note.grid(row=row, column=0, columnspan=4, sticky='ew', pady=4)
+        self._register_param_extra(frame, [bought_note], text='成品电感 L DCR 损耗 电流', predicate=self._purchased_inductor)
+        row += 1
         ttk_label = ttk.Label(frame, text='先选择材料和磁芯，再配置绕组；L/变比在②组编辑。', style='Muted.TLabel', wraplength=350)
         ttk_label.grid(row=row, column=0, columnspan=4, sticky='w', pady=3)
-        self._register_param_extra(frame, [ttk_label], text='磁芯 材料 绕组')
+        self._register_param_extra(frame, [ttk_label], text='磁芯 材料 绕组', predicate=lambda:not self._purchased_inductor())
         row += 1
         self.params['core_shape'] = tk.StringVar(value='auto')
         self.params['core_choice_L'] = tk.StringVar(value='auto')
+        self.params['core_material'] = tk.StringVar(value=DEFAULT_PARAMS['core_material'])
         for name, var, choices, attr, callback, predicate in (
-                ('磁芯材料', None, list(mag.STEINMETZ_MATERIALS), 'mat_combo', self.on_material_change, None),
+                ('磁芯材料', self.params['core_material'], list(mag.STEINMETZ_MATERIALS), 'mat_combo', self.on_material_change, None),
                 ('磁芯形状', self.params['core_shape'], ['auto']+mag.core_shape_list(), 'shape_combo', self.on_core_shape_change, None),
                 ('磁芯型号', self.params['core_choice'], ['auto',CUSTOM_CORE]+list(mag.CORE_DB), 'core_combo', self.on_core_model_change, None),
                 ('正激输出电感磁芯', self.params['core_choice_L'], ['auto',CUSTOM_CORE]+list(mag.CORE_DB), 'inductor_core_combo', None,
@@ -471,13 +499,12 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
             combo = ttk.Combobox(frame, textvariable=var, values=choices, state='readonly', width=14)
             combo.grid(row=row, column=1, columnspan=3, sticky='ew', pady=3)
             setattr(self, attr, combo)
-            if attr == 'mat_combo':
-                combo.set('N87')
             if callback:
                 combo.bind('<<ComboboxSelected>>', lambda _event, fn=callback: fn())
             logical_key = {'mat_combo': 'material', 'shape_combo': 'core_shape',
                            'core_combo': 'core_choice', 'inductor_core_combo': 'core_choice_L'}[attr]
-            self._register_param_extra(frame, [label, combo], text=name+' '+logical_key, predicate=predicate)
+            self._register_param_extra(frame, [label, combo], text=name+' '+logical_key,
+                predicate=lambda original=predicate:not self._purchased_inductor() and (original is None or original()))
             row += 1
             if attr in ('core_combo','inductor_core_combo'):
                 key='custom_core' if attr=='core_combo' else 'custom_core_L'
@@ -487,7 +514,8 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
                 self._custom_core_editors[key]=editor
                 visible_core=(lambda:is_custom(self.params['core_choice'].get())) if key=='custom_core' else (
                     lambda:self._topo_key()=='ACF-FORWARD' and not self._multiple_active() and is_custom(self.params['core_choice_L'].get()))
-                self._register_param_extra(frame,[editor.frame],text=key+' 自定义 非标准 磁芯 Ae Ve Wa MLT 尺寸 mm cm',predicate=visible_core)
+                self._register_param_extra(frame,[editor.frame],text=key+' 自定义 非标准 磁芯 Ae Ve Wa MLT 尺寸 mm cm',
+                    predicate=lambda original=visible_core:not self._purchased_inductor() and original())
                 var.trace_add('write',self._custom_core_context_changed)
                 row+=1
         return row
@@ -616,13 +644,13 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
             'capacitors': f"输入 {len(self._cap_editors['input'].values) if 'input' in self._cap_editors else 2} 颗 / "+('各路输出独立配置' if multiple else f"输出 {len(self._cap_editors['output'].values) if 'output' in self._cap_editors else 2} 颗电容")+' · 可增删',
             'drive': 'Vgs '+val('Vgs', 'V')+' · 开通/关断电阻分别配置',
             'sense': ('MP6005：PCM，采样增益固定11' if self._psr_active() else '电压模式' if mode == 'Voltage Mode' else '峰值电流模式')+' · 采样电阻仍计损耗',
-            'mag': '材料 / 磁芯 → 绕组 → 温升；自动与手工分开',
+            'mag': '外购成品电感 · 不设计磁芯 / 绕组 · L 仍参与计算' if self._purchased_inductor() else '材料 / 磁芯 → 绕组 → 温升；自动与手工分开',
             'ctrl': (('PSR-MP6005' if self._psr_active() else 'SSR')+f' · OUT{self.feedback_output.get() if multiple else 1}' if topo in ISOLATED else '非隔离反馈')+' · '+('type2（MP6005）' if self._psr_active() else self._controller_key()),
         }
         for section, text in summaries.items():
             if section == 'ctrl' and 'fc_target' in self.params:
                 text += ' · 目标 fc '+val('fc_target', 'Hz')+' / PM '+val('pm_target', '°')
-            missing = [key for key in self._param_group_keys.get(section, []) if META[key].required and applicable(key, topo, mode)
+            missing = [key for key in self._param_group_keys.get(section, []) if META[key].required and self._scalar_parameter_active(key)
                        and not (key == 'Vgp_off' and self._mos_current_plateau_active()) and not self._mos_charge_parameter_hidden(key)
                        and not self._output_owns_parameter(key)
                        and self._param_value_missing(key)]
@@ -646,7 +674,7 @@ class ParameterPanelUI(DeviceCurveUI, CustomCoreUI):
         self._refresh_param_rows()
         search = self.param_search.get().strip().lower()
         topo, mode = self._presentation_context()
-        flags = {key: self.params[key].get() for key in OPTION_NAMES}
+        flags = {key: self.params[key].get() for key in (*OPTION_NAMES, 'inductor_design_enabled')}
         visible_keys = set()
         for key, widgets in self._param_widgets.items():
             spec = META[key]

@@ -49,6 +49,14 @@ def render_stage(q,rails,geometry,kvals,clamp,settings):
         lines.append(f'BLOAD{i} out{i} sgnd I=V(out{i},sgnd)/{add("RLOAD"+str(i),resistance)}*(1+({{LOAD_AFTER}}-1)*limit((time-{{TLOAD}})/1e-6,0,1))')
         lines.append(f'SSHORT{i} out{i} sgnd short{i} 0 SHORT_SW')
         lines.append(f'BSHORT{i} short{i} 0 V=if(({{SHORT_EN}}>0.5)&({{SHORT_OUT}}=={i}),V(short_stim),0)')
+    coupling = q.get('coupling_config') or {}
+    if coupling.get('enabled') or coupling.get('field_matrix_enabled'):
+        from winding_coupling import validate_coupling_config
+        self_l = validate_coupling_config(coupling, len(rails))['self_inductances_H']
+        if self_l is not None:
+            params['LP'] = float(self_l[0])
+            for i, value in enumerate(self_l[1:], 1):
+                params['LS'+str(i)] = float(value)
     names=['LP']+['LS'+str(i) for i in range(1,len(rails)+1)]
     for i in range(len(names)):
         for j in range(i+1,len(names)):

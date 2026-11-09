@@ -90,6 +90,10 @@ def _prepare_reference(base):
         # There is no second point that could silently select different hardware.
         return reference, {}, result
     fixed = pin_hardware(reference, result)
+    if fixed.get('_qr_rcd_hardware') and not reference.get('_qr_rcd_hardware'):
+        # Kc selected the reference R/C once. Re-evaluate that same hardware
+        # so the first endpoint carries the fixed-RC residual/provenance too.
+        result = compute_design(fixed)
     hardware = {key.removeprefix('_fixed_'): copy.deepcopy(value)
                 for key, value in fixed.items() if key.startswith('_fixed_')}
     return fixed, hardware, result

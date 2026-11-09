@@ -4,6 +4,7 @@ import { design, checks } from "./engine";
 import { tune, loopResponse } from "./loop";
 import { compensationAction } from "./compensation";
 import { lineChart } from "./charts";
+import { inductorHardware } from "./inductor_selection";
 export function scaleLoad(raw: Spec, fraction: number) {
   const p = clone(raw);
   if (!(fraction > 0 && fraction <= 1)) throw Error("负载比例须为 (0,1]");
@@ -23,7 +24,7 @@ export function pinHardware(run: Spec) {
         run.op.acf_model?.transformer_hardware ||
         run.mag.transformer,
     );
-  if (run.mag.inductor) p._fixed_inductor = clone(run.mag.inductor);
+  if (run.mag.inductor) p._fixed_inductor = inductorHardware(run.mag.inductor);
   if (run.mag.inductors) p._fixed_inductors = clone(run.mag.inductors);
   if (run.psr) {
     p.psr_Na = run.psr.Na;
@@ -111,7 +112,12 @@ export function cornerAnalysis(
             r.mag.transformer,
             ...(r.mag.inductors || [r.mag.inductor]),
           ].filter(Boolean),
-          ck = checks(p, r);
+          ck = checks(p, r),
+          finiteMaximum = (key: string) => {
+            const values = devices.map((d) => d[key])
+              .filter((v) => typeof v === "number" && Number.isFinite(v));
+            return values.length ? Math.max(...values) : null;
+          };
         Object.assign(row, {
           skipped: false,
           mode: r.op.mode,
@@ -121,8 +127,8 @@ export function cornerAnalysis(
           V_sw_max: r.op.V_sw_max,
           ripple_pp: r.wf.ripple_pp,
           eta: r.eta,
-          dT: Math.max(...devices.map((d) => d.dT)),
-          B_pk: Math.max(...devices.map((d) => d.B_pk)),
+          dT: finiteMaximum("dT"),
+          B_pk: finiteMaximum("B_pk"),
           fc: r.loop?.fc,
           pm: r.loop?.pm,
           min_pm: r.loop?.min_pm,
@@ -147,7 +153,7 @@ export function cornerAnalysis(
     ["min_pm", "min_pm", true],
   ] as [string, string, boolean][]) {
     const valid = rows
-      .filter((r) => !r.skipped && Number.isFinite(r[key]))
+      .filter((r) => !r.skipped && typeof r[key] === "number" && Number.isFinite(r[key]))
       .sort((a, b) => (isMin ? 1 : -1) * (a[key] - b[key]));
     if (valid.length) {
       worst[label] = valid[0][key];

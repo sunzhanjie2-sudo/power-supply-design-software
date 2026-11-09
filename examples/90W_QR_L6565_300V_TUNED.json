@@ -10,35 +10,35 @@
   "Vf": 1.0,
   "ripple_target": 0.01,
   "ring_margin": 0.3,
-  "C_out": 0.00043999999999999996,
-  "Rc": 0.015,
+  "C_out": 0.00021999999999999998,
+  "Rc": 0.034,
   "ESL": 5e-09,
-  "C_out2": 9.999999999999999e-06,
-  "Rc2": 0.001,
-  "ESL2": 1e-09,
+  "C_out2": 0.00021999999999999998,
+  "Rc2": 0.034,
+  "ESL2": 5e-09,
   "Cin1": 1e-05,
-  "Rcin1": 0.015,
-  "ESLin1": 5e-09,
+  "Rcin1": 0.0109,
+  "ESLin1": 2.4e-08,
   "Cin2": 1e-05,
-  "Rcin2": 0.015,
-  "ESLin2": 5e-09,
+  "Rcin2": 0.0109,
+  "ESLin2": 2.4e-08,
   "V_in_min": 300.0,
   "V_in_max": 300.0,
-  "Rds_on": 0.31,
-  "Vf_diode": 0.7,
+  "Rds_on": 0.34,
+  "Vf_diode": 1.3,
   "Rd_diode": 0.001,
-  "Coss": 0.0,
-  "Qg": 2.5000000000000002e-08,
-  "Vth": 3.0,
-  "Vgp_on": 3.8,
-  "Vgp_off": 4.0,
-  "Qg_th": 1.5000000000000002e-09,
-  "Qgs": 5e-09,
-  "Qgd": 2e-08,
+  "Coss": 9.9e-11,
+  "Qg": 1.78e-08,
+  "Vth": 3.5,
+  "Vgp_on": 5.4,
+  "Vgp_off": 5.4,
+  "Qg_th": 3.3e-09,
+  "Qgs": 5.1e-09,
+  "Qgd": 5.5e-09,
   "Rg_drive": 2.0,
   "Rs_on": 4.7,
   "Rs_off": 3.0,
-  "Rg": 1.0,
+  "Rg": 1.8,
   "k_sw": 0.25,
   "Qrr": 0.0,
   "Vgs": 10.0,
@@ -137,7 +137,7 @@
     "cross_mode": 0.0,
     "cross_hold_ms": 8.0,
     "cross_timeout_s": 1200.0,
-    "qr_cds_pf": 470.0,
+    "qr_cds_pf": 99.0,
     "qr_aux_ratio": 0.1,
     "qr_zcd_r": 22000.0,
     "qr_zcd_c_pf": 5.0,
@@ -154,5 +154,332 @@
     "qr_cs_clamp_v": 1.4,
     "qr_ocp_v": 2.0,
     "qr_max_on_us": 100.0
-  }
+  },
+  "core_material": "DMR44",
+  "mu_r": 0.0,
+  "tr": 4.9e-09,
+  "tf": 1.1e-08,
+  "device_curve_settings": {
+    "mode": "fixed",
+    "overrides": {}
+  },
+  "mos_miller_mode": "manual",
+  "mos_charge_mode": "manual",
+  "mos_miller_curve": {},
+  "mos_charge_curve": {},
+  "mos_manual_events": {},
+  "diode_curves": {},
+  "gfs": 0.0,
+  "Vf_din": 1.7,
+  "Vf_dout": 0.8,
+  "input_capacitors": [
+    {
+      "C": 1e-05,
+      "ESR": 0.0109,
+      "ESL": 2.4e-08
+    },
+    {
+      "C": 1e-05,
+      "ESR": 0.0109,
+      "ESL": 2.4e-08
+    }
+  ],
+  "output_capacitors": [
+    {
+      "C": 0.00021999999999999998,
+      "ESR": 0.034,
+      "ESL": 5e-09
+    },
+    {
+      "C": 0.00021999999999999998,
+      "ESR": 0.034,
+      "ESL": 5e-09
+    },
+    {
+      "C": 1e-05,
+      "ESR": 0.0109,
+      "ESL": 2.4e-08
+    }
+  ],
+  "component_management": {
+    "version": 1,
+    "zone": "I",
+    "items": {
+      "Q1": {
+        "manufacturer": "STMicroelectronics",
+        "model": "STP80N340K6",
+        "package": "TO-220",
+        "conditions": "DS14083 Rev1,Sep2022; p2 ratings,p3 Tables4/5/6,p4 body diode,p5/6 Fig4/Fig7；Vgs10V,Id6A,Tc25C；640V,6A,Vgs0..10V；N-channel",
+        "note": "220V固定频率/300V QR高压候选。计算Coss=99pF明确是Co(tr)常量近似，非13pF点值。当前画布旧QR联合仿真启动Vds约1.335kV，800V候选未通过该启动应力；不得将换器件资料说成解决启动问题。10V驱动为项目假设，L6565理想Vcc15V本身不等于实物受限10V门驱动。；资料：https://www.st.com/resource/en/datasheet/stp80n340k6.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": 800.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "C_IN1": {
+        "manufacturer": "TDK",
+        "model": "B32774D4106K000",
+        "package": "Radial boxed 31.5×15×24.5 mm; pitch 27.5 mm",
+        "conditions": "IRMS max 8A，70°C/10kHz，ΔT≤20°C；ESR典型10.9mΩ，70°C/10kHz；ESL典型24nH，谐振频率处。",
+        "note": "10µF/450V输入可用；若用作低压输出旁路体积明显过配。额定纹波不能视为任意频率和温度下的能力。；额定纹波仅对应所列频温条件，跨条件需修正；ESL及阻抗代理见参数来源。；资料：https://www.tdk-electronics.tdk.com/inf/20/20/db/fc_2009/MKP_B32774_778.pdf https://product.tdk.com/en/search/capacitor/film/dc-link/info?part_no=B32774D4106K000",
+        "capacitor_type": "film",
+        "voltage_V": 450.0,
+        "ripple_A": 8.0,
+        "power_W": null
+      },
+      "C_IN2": {
+        "manufacturer": "TDK",
+        "model": "B32774D4106K000",
+        "package": "Radial boxed 31.5×15×24.5 mm; pitch 27.5 mm",
+        "conditions": "IRMS max 8A，70°C/10kHz，ΔT≤20°C；ESR典型10.9mΩ，70°C/10kHz；ESL典型24nH，谐振频率处。",
+        "note": "10µF/450V输入可用；若用作低压输出旁路体积明显过配。额定纹波不能视为任意频率和温度下的能力。；额定纹波仅对应所列频温条件，跨条件需修正；ESL及阻抗代理见参数来源。；资料：https://www.tdk-electronics.tdk.com/inf/20/20/db/fc_2009/MKP_B32774_778.pdf https://product.tdk.com/en/search/capacitor/film/dc-link/info?part_no=B32774D4106K000",
+        "capacitor_type": "film",
+        "voltage_V": 450.0,
+        "ripple_A": 8.0,
+        "power_W": null
+      },
+      "C_O1": {
+        "manufacturer": "Panasonic",
+        "model": "EEUFS2A221",
+        "package": "Radial Ø12.5×25 mm; pitch 5 mm",
+        "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+        "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。；额定纹波仅对应所列频温条件，跨条件需修正；ESL及阻抗代理见参数来源。；资料：https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFS2A221 https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1255.pdf",
+        "capacitor_type": "electrolytic",
+        "voltage_V": 100.0,
+        "ripple_A": 1.8,
+        "power_W": null
+      },
+      "C_O2": {
+        "manufacturer": "Panasonic",
+        "model": "EEUFS2A221",
+        "package": "Radial Ø12.5×25 mm; pitch 5 mm",
+        "conditions": "额定纹波：100 kHz / +105°C；阻抗上限：100 kHz / +20°C；容量±20%。",
+        "note": "软件ESR采用原厂100 kHz阻抗上限作为电阻代理，非独立测得ESR；5 nH ESL为工程占位，原厂未给该型号值。；额定纹波仅对应所列频温条件，跨条件需修正；ESL及阻抗代理见参数来源。；资料：https://industrial.panasonic.com/ww/products/pt/aluminum-cap-lead/models/EEUFS2A221 https://industrial.panasonic.com/cdbs/www-data/pdf/RDF0000/ABA0000C1255.pdf",
+        "capacitor_type": "electrolytic",
+        "voltage_V": 100.0,
+        "ripple_A": 1.8,
+        "power_W": null
+      },
+      "C_O3": {
+        "manufacturer": "TDK",
+        "model": "B32774D4106K000",
+        "package": "Radial boxed 31.5×15×24.5 mm; pitch 27.5 mm",
+        "conditions": "IRMS max 8A，70°C/10kHz，ΔT≤20°C；ESR典型10.9mΩ，70°C/10kHz；ESL典型24nH，谐振频率处。",
+        "note": "10µF/450V输入可用；若用作低压输出旁路体积明显过配。额定纹波不能视为任意频率和温度下的能力。；额定纹波仅对应所列频温条件，跨条件需修正；ESL及阻抗代理见参数来源。；资料：https://www.tdk-electronics.tdk.com/inf/20/20/db/fc_2009/MKP_B32774_778.pdf https://product.tdk.com/en/search/capacitor/film/dc-link/info?part_no=B32774D4106K000",
+        "capacitor_type": "film",
+        "voltage_V": 450.0,
+        "ripple_A": 8.0,
+        "power_W": null
+      },
+      "U_CTRL": {
+        "manufacturer": "STMicroelectronics",
+        "model": "L6565D",
+        "package": "SO-8",
+        "conditions": "控制器功能原型；本例仍使用通用可配置行为逻辑，未展开原厂模型/驱动/偏置。",
+        "note": "资料：https://www.st.com/resource/en/datasheet/l6565.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": null,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "J1": {
+        "manufacturer": "Phoenix Contact",
+        "model": "MKDS 1,5/ 2-5,08 (1715721)",
+        "package": "2位 PCB螺钉端子 / 5.08 mm",
+        "conditions": "原厂III/2条件400 V、17.5 A；III/3仅250 V，整机污染等级/爬电/导线与认证需另核。",
+        "note": "资料：https://www.phoenixcontact.com/en-us/products/printed-circuit-board-terminal-mkds-15-2-508-1715721",
+        "capacitor_type": "unknown",
+        "voltage_V": 400.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "R_S1": {
+        "manufacturer": "Bourns",
+        "model": "PWR221T-30-R330F",
+        "package": "TO-220-2 insulated power resistor",
+        "conditions": "25°C自由空气额定2.25W（无散热器）；30W只适用于壳温25°C/指定散热器，当前不采用30W。1%容差。",
+        "note": "20%允许平均0.45W；引脚/本体最大电感0.1µH，需要独立检查高频采样误差。；资料：https://www.bourns.com/docs/product-datasheets/pwr221t-30.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": null,
+        "ripple_A": null,
+        "power_W": 2.25
+      },
+      "T1": {
+        "manufacturer": "项目定制绕制 / DMEGC磁芯",
+        "model": "DMR44 / PQ32-30 / T1（自绕）",
+        "package": "PQ32-30骨架/绕组",
+        "conditions": "保留本例整数匝数、线径/股数/并绕与结构；并非已存在的商品变压器订货型号。",
+        "note": "DMR44-REV.B：μi=2400±25%@10kHz/B<0.25mT/25°C，Bs=0.4T@100°C。自绕磁件结构来自各例实际设计，不虚构成品订货型号；项目Steinmetz拟合系数、Ri-a与几何假设仍按原配置，非此材料表直接给定。 https://www.dmegc.de/uploads/20230401/DMR44%20Material%20Characteristics.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": null,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "D_IN": {
+        "manufacturer": "STMicroelectronics",
+        "model": "STTH3R06S",
+        "package": "SMC",
+        "conditions": "DS3697 Rev4,Oct2021; p1 package,p2/p3 electrical",
+        "note": "220/300V输入防反候选；浪涌/输入电容冲击电流与外部反接工况未覆盖，不作完整启动合格结论。；未计入的Qrr/Cj保持未覆盖，不以零值宣称物理为零；反压另需实测寄生尖峰。；资料：https://www.st.com/resource/en/datasheet/stth3r06.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": 600.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "D_SN1": {
+        "manufacturer": "Nexperia",
+        "model": "US3M",
+        "package": "SMC / SOD1003-1",
+        "conditions": "US3M v1,20-Jan2025; p1/2 ratings,p4 electrical",
+        "note": "高压RCD钳位候选。1000V不能覆盖已见1.335kV启动波形，且当前模型未独立给出钳位管实际反压。不要把通用SPICE钳位管0.7V直接描述为US3M实际Vf；本表值与Nexperia制造商严格绑定。；未计入的Qrr/Cj保持未覆盖，不以零值宣称物理为零；反压另需实测寄生尖峰。；资料：https://assets.nexperia.com/documents/data-sheet/US3M.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": 1000.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "R_SN1": {
+        "manufacturer": "Vishay BCcomponents",
+        "model": "4 × PR03000201803JAC00 串联（候选）",
+        "package": "4×Axial DIN0617",
+        "conditions": "P70=3W（Cu引线版本，R≥1Ω）；750V工作电压上限；±5%。FeCu版本为2.5W，不混用。",
+        "note": "单颗20%平均≤0.6W；RCD可用相同电阻串联均分电压/功耗。具体串并联值必须与软件派生R匹配，未匹配只可作为候选BOM，不能冒充实装验证。；4颗串联为72kΩ/12W候选；软件RCD的R仍按K/Kc派生，不能当作实装电阻已验证。；资料：https://www.vishay.com/docs/28729/pr010203.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": null,
+        "ripple_A": null,
+        "power_W": 12.0
+      },
+      "C_SN1": {
+        "manufacturer": "TDK",
+        "model": "B32652A1332J000",
+        "package": "Radial MKP boxed 18×5×10.5 mm; pitch 15 mm",
+        "conditions": "IRMS max：85°C/100kHz、ΔT≤20°C；ESR典型值于100kHz；±10%（J=±5%）；ESL未提供。",
+        "note": "用于有源钳位或RCD标准容量候选；若软件派生容量不等于本型号，不可称实装一致。10nH ESL仅工程占位。；3.3nF标准件仅为候选；计算/电路仍使用派生C_snub，不声称实装容量一致。；资料：https://product.tdk.com/system/files/dam/doc/product/capacitor/film/mkp_mfp/data_sheet/20/20/db/fc_2009/mkp_b32651_658.pdf https://product.tdk.com/en/search/capacitor/film/snubbering_pfc/info?part_no=B32652A1332J000",
+        "capacitor_type": "film",
+        "voltage_V": 1600.0,
+        "ripple_A": 0.9,
+        "power_W": null
+      },
+      "J2": {
+        "manufacturer": "Phoenix Contact",
+        "model": "MKDS 1,5/ 2-5,08 (1715721)",
+        "package": "2位 PCB螺钉端子 / 5.08 mm",
+        "conditions": "原厂III/2条件400 V、17.5 A；III/3仅250 V，整机污染等级/爬电/导线与认证需另核。",
+        "note": "资料：https://www.phoenixcontact.com/en-us/products/printed-circuit-board-terminal-mkds-15-2-508-1715721",
+        "capacitor_type": "unknown",
+        "voltage_V": 400.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "D1": {
+        "manufacturer": "STMicroelectronics",
+        "model": "STTH8L06D",
+        "package": "TO-220AC",
+        "conditions": "DocID8373 Rev6,Feb2012; p1/2 characteristics,p10 ordering",
+        "note": "高压QR主副边整流候选，适用DCM/临界/续流场景。1.3V是8A/25C最大点，低电流仍为粗略常值。Qrr未列表，不能把MOS体二极管4.3uC抄成这里的Qrr。寄生尖峰与实际换流仍需复核。；未计入的Qrr/Cj保持未覆盖，不以零值宣称物理为零；反压另需实测寄生尖峰。；资料：https://www.st.com/resource/en/datasheet/stth8l06.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": 600.0,
+        "ripple_A": null,
+        "power_W": null
+      },
+      "D_OUT": {
+        "manufacturer": "Vishay General Semiconductor",
+        "model": "SS3H10-E3/57T",
+        "package": "SMC / DO-214AB",
+        "conditions": "Document88752,13-Nov2025; p1 ratings,p2 electrical",
+        "note": "100V低压防反/低电流辅助整流候选，0.8V只是3A/25C保守固定参考。防反管的反向应力取决于外部反接/回灌源，未指定该源时不能判已验证耐压。；未计入的Qrr/Cj保持未覆盖，不以零值宣称物理为零；反压另需实测寄生尖峰。；资料：https://www.vishay.com/docs/88752/ss3h9.pdf",
+        "capacitor_type": "unknown",
+        "voltage_V": 100.0,
+        "ripple_A": null,
+        "power_W": null
+      }
+    },
+    "overrides": {},
+    "override_reason": ""
+  },
+  "__real_parts": {
+    "version": 1,
+    "date": "2026-11-08",
+    "selections": {
+      "Q1": {
+        "catalog": "semiconductor",
+        "key": "STP80N340K6"
+      },
+      "C_IN1": {
+        "catalog": "passive",
+        "key": "B32774D4106K000"
+      },
+      "C_IN2": {
+        "catalog": "passive",
+        "key": "B32774D4106K000"
+      },
+      "C_O1": {
+        "catalog": "passive",
+        "key": "EEUFS2A221"
+      },
+      "C_O2": {
+        "catalog": "passive",
+        "key": "EEUFS2A221"
+      },
+      "C_O3": {
+        "catalog": "passive",
+        "key": "B32774D4106K000"
+      },
+      "U_CTRL": {
+        "catalog": "controller",
+        "key": "L6565D",
+        "url": "https://www.st.com/resource/en/datasheet/l6565.pdf"
+      },
+      "J1": {
+        "catalog": "support",
+        "key": "MKDS_2"
+      },
+      "R_S1": {
+        "catalog": "passive",
+        "key": "PWR221T-30-R330F"
+      },
+      "T1": {
+        "catalog": "custom-winding",
+        "key": "PQ32-30"
+      },
+      "D_IN": {
+        "catalog": "semiconductor",
+        "key": "STTH3R06S"
+      },
+      "D_SN1": {
+        "catalog": "semiconductor",
+        "key": "US3M"
+      },
+      "R_SN1": {
+        "catalog": "passive",
+        "key": "PR03000201803JAC00",
+        "quantity": 4,
+        "scope": "candidate-only"
+      },
+      "C_SN1": {
+        "catalog": "passive",
+        "key": "B32652A1332J000",
+        "scope": "candidate-only"
+      },
+      "J2": {
+        "catalog": "support",
+        "key": "MKDS_2"
+      },
+      "D1": {
+        "catalog": "semiconductor",
+        "key": "STTH8L06D"
+      },
+      "D_OUT": {
+        "catalog": "semiconductor",
+        "key": "SS3H10-E3/57T"
+      }
+    },
+    "retired_curve_bindings": [],
+    "scope": "原厂型号及参考电气标量初选；不等于原厂非线性模型、全温/启动或可生产BOM验证",
+    "assumptions": [
+      "各输入端点使用同一器件；Vgp/Qg参考条件不等于四事件实测。",
+      "RCD与PSR派生阻容未落标准值的条目明确为候选/系列，不冒充精确实装。",
+      "电解阻抗代理、ESL假设、磁件热阻/损耗系数和未知附加损耗按条件另核。"
+    ]
+  },
+  "__example_note": "\n已补真实器件初选；固定参考值模式。来源与限制见“关键器件BOM与降额”和docs/EXAMPLE_REAL_PARTS.md；旧匿名曲线已解除绑定。"
 }

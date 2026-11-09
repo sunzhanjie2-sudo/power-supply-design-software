@@ -11,7 +11,7 @@ ISOLATED = ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD')
 RAIL_KEYS = ('V_out','P_out','P_out_min','C_out','Rc','ESL','C_out2','Rc2','ESL2',
              'cout2_enable','Vf_diode','Rd_diode','Qrr','d_out_enable',
              'Vf_dout','Rd_dout','ripple_target','Ns','d_wire_s',
-             'n_strand_s','L','core_choice_L','custom_core_L')
+             'n_strand_s','parallel_wires_s','L','core_choice_L','custom_core_L')
 
 
 def _resolved_output_specs(p):
@@ -30,6 +30,8 @@ def _resolved_output_specs(p):
         rail = {k:copy.deepcopy(p.get(k)) for k in RAIL_KEYS}
         if i>0: rail.update(Ns=0,d_wire_s=0.)
         rail.update(entry)
+        from parallel_wires import count
+        rail['parallel_wires_s']=count(rail,'s')
         from capacitor_banks import normalize
         rail=normalize(rail)
         rail['Rd_diode']=rail['Rd_dout']=0.  # old JSON accepted, no hidden Rd model
@@ -148,6 +150,17 @@ def compute_isolated_op(p):
               feedback_output=int(p.get('feedback_output',1)),regulation_region=region,
               aggregate_op=core,aggregate_params=pp,outputs=rails)
     if not rails: return op
+    if p['topology'] == 'QR-FLYBACK':
+        op['regulation_region'] = 'QR-shared-cycle'
+        op['qr_multi_model'] = dict(
+            kind='qr-shared-cycle-nominal', scope='ideal-ratio-reduced',
+            feedback_output=op['feedback_output'],
+            total_output_power_W=sum(r['P_out'] for r in rails),
+            shared_period_s=core['Ts'],
+            independent_cross_regulation=False,
+            independent_winding_commutation=False,
+            assumptions='所有输出共用由总负载决定的QR周期，非反馈电压由实际匝数及固定压降派生；'
+                        '各路电流采用标称功率分配近似，未独立求解漏感换流、辅助绕组轻载脉冲或交叉调整率。')
     op['output_turns'] = turns
     total = sum(r['P_out'] for r in rails)
     branch_ops = []
@@ -286,7 +299,7 @@ def multi_magnetics(op,p):
         tr['R_dc_p_geometry'] = tr['R_dc_p']
         tr['R_dc_p'] = coupled['R'][0]
         tr['I_rms_p'] = coupled['winding_rms'][0]
-        tr['J_actual_p'] = tr['I_rms_p']/(tr['n_strand_p']*tr['A_strand_p'])
+        tr['J_actual_p'] = tr['I_rms_p']/(tr['n_strand_p']*tr.get('parallel_wires_p',1)*tr['A_strand_p'])
         tr['dcr_source'] = 'geometry'
         tr['auto_wire_sizing'] = 'nominal-predesign-frozen'
         # A general L matrix does not identify a unique common-core flux.
@@ -304,23 +317,25 @@ def multi_magnetics(op,p):
                             uniform_t,uniform_flux,tr['Ve'])
     windings,inductors = [],[]
     copper = tr['Fr_p']*tr['R_dc_p']*tr['I_rms_p']**2
-    area = tr['Np']*tr['n_strand_p']*tr['A_strand_p']
+    area = tr['Np']*tr['n_strand_p']*tr.get('parallel_wires_p',1)*tr['A_strand_p']
     for rail,child in zip(op['outputs'],op['output_ops']):
         current = child.get('I_s_rms',child['I_d_rms'])
         frozen = hardware['windings'][rail['id']-1] if hardware else None
         turns = frozen['Ns'] if frozen else int(rail['Ns']) or max(1,round(tr['Np']/child['N']))
         strands = int(frozen['n_strand_s'] if frozen else rail['n_strand_s'])
-        diameter = frozen['d_wire_s'] if frozen else rail['d_wire_s'] or max(50e-6,mag.wire_diameter(current/strands,p['J']))
+        copies = int(frozen.get('parallel_wires_s',1) if frozen else rail['parallel_wires_s'])
+        total_strands = strands*copies
+        diameter = frozen['d_wire_s'] if frozen else rail['d_wire_s'] or max(50e-6,mag.wire_diameter(current/total_strands,p['J']))
         a = math.pi*diameter**2/4
-        geometric_resistance = p['rho']*tr['MLT']*turns/(strands*a)
+        geometric_resistance = p['rho']*tr['MLT']*turns/(total_strands*a)
         resistance = coupled['R'][rail['id']] if coupled else geometric_resistance
         fr = mag.ac_factor(diameter,op['f_sw'],p['rho'])
         loss = fr*resistance*current**2
-        copper += loss; area += turns*strands*a
+        copper += loss; area += turns*total_strands*a
         predicted = op['aggregate_op']['V_out']*(turns/tr['Np'])*op['aggregate_op']['N']
         windings.append(dict(id=rail['id'],name=rail['name'],Ns=turns,N=child['N'],
-            n_actual=tr['Np']/turns,d_wire_s=diameter,n_strand_s=strands,
-            I_rms=current,R_dc=resistance,Fr=fr,P_cu=loss,J_actual=current/(strands*a),
+            n_actual=tr['Np']/turns,d_wire_s=diameter,n_strand_s=strands,parallel_wires_s=copies,
+            I_rms=current,R_dc=resistance,Fr=fr,P_cu=loss,J_actual=current/(total_strands*a),
             R_dc_geometry=geometric_resistance,
             V_turns_est=predicted,voltage_error=(predicted/rail['V_out']-1)*100))
         if op['topology']=='ACF-FORWARD':

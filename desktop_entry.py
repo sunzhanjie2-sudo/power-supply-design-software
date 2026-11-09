@@ -4,8 +4,11 @@ import multiprocessing
 
 def main():
     multiprocessing.freeze_support()
-    # Keep native text sharp and geometry in physical pixels on high-DPI PCs.
     import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--field-worker':
+        from field_worker import main as field_main
+        raise SystemExit(field_main(sys.argv[2:]))
+    # Keep native text sharp and geometry in physical pixels on high-DPI PCs.
     if sys.platform == 'win32':
         import ctypes
         try:

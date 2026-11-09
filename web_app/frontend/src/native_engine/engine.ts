@@ -2,6 +2,7 @@ import { windingRows, assess } from "./winding";
 import { preview } from "./preview";
 export { preview } from "./preview";
 import { solveNonisolated } from "./nonisolated";
+import { inductorHardware } from "./inductor_selection";
 import {
   type Spec,
   normalize,
@@ -39,7 +40,7 @@ function magnetic(p: Spec, op: Spec): Spec {
   if (!isolated(p)) {
     const fixed = op.niso_model?.inductor;
     const ind = inductor(op, fixed ? { ...p, _fixed_inductor: fixed } : p);
-    if (op.niso_model) {
+    if (op.niso_model && ind.design_enabled !== false) {
       const old = ind.P_total;
       ind.R_dc = op.niso_model.dcr;
       ind.P_cu = ind.Fr * ind.R_dc * op.I_L_rms ** 2;
@@ -402,7 +403,8 @@ export function componentEvaluation(p: Spec, res: Spec) {
         row.ref === "Q2" ? res.op.V_clamp : stress(res.op).switch.V_block,
         "voltage_V",
         "V",
-        "稳态阻断平台；三温耐压与实测仍须复核",
+        stress(res.op).switch.blocking_voltage_note ||
+          "稳态阻断平台；三温耐压与实测仍须复核",
       );
       const narrow =
         res.op.clamp?.t_pulse != null &&
@@ -733,7 +735,7 @@ export function calculate(
     const res = design(p);
     if (!i) {
       fixed = res.mag.transformer;
-      fixedInductor = res.mag.inductor;
+      fixedInductor = res.mag.inductor ? inductorHardware(res.mag.inductor) : undefined;
       if (res.mag.inductors)
         extraFixed._fixed_inductors = clone(res.mag.inductors);
       if (res.psr) {

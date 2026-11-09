@@ -6,10 +6,145 @@ import math
 import numpy as np
 
 
-def write_report(path,evidence,*,chart_images=None):
+def _endpoint(case):
+    """Use the stored endpoint identity, never infer it from voltage ordering."""
+    name = str(case.get('id', ''))
+    for endpoint in ('Vinmin', 'Vinmax'):
+        if name == endpoint or name.startswith(endpoint+'_'):
+            return endpoint, name[len(endpoint):].strip('_ ') or '标称工况'
+    return None, name or '未命名工况'
+
+
+def _render_endpoint_modules(doc, modules, make_table, paragraph, page):
+    """Recompose complete evidence by test family and physical subject.
+
+    Scalars remain scalars; all rows and plots are retained.  In particular a
+    missing endpoint is not paired with the other endpoint's values or image.
+    """
+    from collections import OrderedDict, defaultdict
+    from itertools import zip_longest
+    from docx_layout import figure, figure_pair
+    from docx.shared import Cm
+    families, groups = OrderedDict(), OrderedDict()
+    for module in modules:
+        endpoint, family = _endpoint(module['case'])
+        if endpoint is None:
+            # Nonstandard saved IDs remain explicitly unbound and readable.
+            family = '未绑定端点 '+family
+            endpoint = 'record'
+        cases = families.setdefault(family, {})
+        cases[endpoint] = module['case']
+        key = (family, module['title'])
+        bucket = groups.setdefault(key, {})
+        if endpoint in bucket:
+            raise ValueError('同一端点与模块存在重复证据：'+module['case']['id']+' / '+module['title'])
+        bucket[endpoint] = module
+
+    def missing(family, endpoint):
+        case = families[family].get(endpoint)
+        if not case:
+            return '未执行：本次未提供该具名端点的证据'
+        if not case.get('complete'):
+            return '工况未完成：'+str(case.get('error') or '未取得有效结果')
+        return '未取得该模块证据；未以另一端点替代'
+
+    def records(module):
+        result, counts = OrderedDict(), defaultdict(int)
+        for block in module.get('blocks', []) if module else []:
+            if block['kind'] != 'table': continue
+            headers = tuple(block['headers']); counts[headers] += 1
+            result[(headers, counts[headers])] = block
+        return result
+
+    for index, ((family, title), sides) in enumerate(groups.items(), 1):
+        heading = page(f'验证 {index}  {family}  {title}')
+        # This is the continuation of the immediately preceding FRA result.
+        # Let it follow a long attribution note instead of stranding that note
+        # alone on a page before another forced page break.
+        if title == '功率级与补偿器频率响应' and heading is not None:
+            heading.paragraph_format.page_break_before = False
+        if 'record' in sides:
+            module = sides['record']
+            paragraph('该记录没有 Vinmin/Vinmax 具名端点，保持独立展示，未推测其归属。')
+            make_table(['记录', '实际输入 / V'], [(module['case']['id'], module['case'].get('voltage', '未取得'))], [12.9, 12.9])
+            for block in module['blocks']:
+                if block['kind']=='paragraph': paragraph(block['text'])
+                elif block['kind']=='table':
+                    make_table(block['headers'], block['rows'], [25.8/len(block['headers'])]*len(block['headers']))
+                else: figure(doc, block['blob'], title, width=9.8)
+            continue
+        left, right = sides.get('Vinmin'), sides.get('Vinmax')
+        labels = {}
+        for name, module in (('Vinmin', left), ('Vinmax', right)):
+            case = module['case'] if module else families[family].get(name)
+            labels[name] = name+('  '+f"{case.get('voltage', '未取得')} V" if case else '  未提供')
+        make_table(['对照范围', labels['Vinmin'], labels['Vinmax']], [
+            ('本次工况', left['case']['id'] if left else missing(family, 'Vinmin'),
+             right['case']['id'] if right else missing(family, 'Vinmax'))], [5.9, 9.95, 9.95])
+
+        lt, rt = records(left), records(right)
+        for key in list(lt)+[k for k in rt if k not in lt]:
+            a, b = lt.get(key), rt.get(key)
+            headers = list(key[0]); lrows = a['rows'] if a else []; rrows = b['rows'] if b else []
+            def keyed(rows):
+                result, counts = OrderedDict(), defaultdict(int)
+                for row in rows:
+                    identity = str(row[0]); counts[identity] += 1
+                    result[(identity, counts[identity])] = row
+                return result
+            la, rb = keyed(lrows), keyed(rrows)
+            ids = list(la)+[k for k in rb if k not in la]
+            if headers == ['指标','单位','设计计算','LTspice 实测','偏差','判定口径']:
+                rows = []
+                for row_id in ids:
+                    x, y = la.get(row_id), rb.get(row_id)
+                    base = x or y
+                    def cells(row, endpoint):
+                        return (row[2], row[3], str(row[4])+'\n'+str(row[5])) if row else ('未取得', '未取得', missing(family,endpoint))
+                    unit = base[1] if not (x and y) or x[1] == y[1] else 'Vinmin '+str(x[1])+' / Vinmax '+str(y[1])
+                    rows.append((base[0], unit, *cells(x,'Vinmin'), *cells(y,'Vinmax')))
+                make_table(['指标','单位','Vinmin 计算','Vinmin 仿真','偏差与状态','Vinmax 计算','Vinmax 仿真','偏差与状态'],
+                           rows,[5.9,1.0,2.6,2.6,4.25,2.6,2.6,4.25])
+            else:
+                def detail(row, endpoint):
+                    if row is None: return missing(family, endpoint)
+                    if len(headers)==2: return row[1]
+                    return '\n'.join(str(h)+'：'+str(v) for h,v in zip(headers[1:],row[1:]))
+                rows = [(str((la.get(k) or rb[k])[0]), detail(la.get(k),'Vinmin'), detail(rb.get(k),'Vinmax')) for k in ids]
+                make_table([headers[0],labels['Vinmin'],labels['Vinmax']],rows,[5.9,9.95,9.95])
+
+        pictures = [[b['blob'] for b in (m or {}).get('blocks',[]) if b['kind']=='chart'] for m in (left,right)]
+        for image_index, (a,b) in enumerate(zip_longest(*pictures), 1):
+            # Each source plot is drawn at its final physical width, retaining
+            # readable fonts rather than shrinking an existing full-page plot.
+            try:
+                from report_architecture import add_paired_figure
+                add_paired_figure(doc,a,b,f'{family}  {title}  图 {image_index}',
+                    left_label=labels['Vinmin'],right_label=labels['Vinmax'])
+            except ImportError:
+                if a and b: figure_pair(doc,a,b,title)
+                else:
+                    paragraph(('Vinmin' if a else 'Vinmax')+'图像；另一端未取得，不作复制。')
+                    figure(doc,a or b,title,width=4.9)
+
+        notes = [[b['text'] for b in (m or {}).get('blocks',[]) if b['kind']=='paragraph'] for m in (left,right)]
+        for a,b in zip_longest(*notes):
+            if a==b and a: paragraph('共同说明：'+a)
+            else:
+                if a: paragraph('Vinmin 说明：'+a)
+                if b: paragraph('Vinmax 说明：'+b)
+
+
+def write_report(path,evidence,*,chart_images=None,document=None,save=True):
+    """Render actual evidence, optionally append to an existing joint report.
+
+    Appending creates a landscape section in the same package. Figures,
+    relationships and native equations remain owned by one Document; no
+    second simulation, XML package merge or global style rewrite is needed.
+    """
     from docx import Document
     from docx.shared import Cm,Pt,RGBColor
-    from docx.enum.section import WD_ORIENT
+    from docx.enum.section import WD_ORIENT,WD_SECTION_START
     from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
@@ -17,27 +152,59 @@ def write_report(path,evidence,*,chart_images=None):
     from docx_layout import equation
     from spice_export import SETTINGS,CHOICES
     prepared=iter(chart_images) if chart_images is not None else None
-    doc=Document();section=doc.sections[0];section.orientation=WD_ORIENT.LANDSCAPE
-    section.page_width=Cm(29.7);section.page_height=Cm(21)
-    section.top_margin=section.bottom_margin=Cm(1.3);section.left_margin=section.right_margin=Cm(1.7)
-    for key in ('Normal','Title','Heading 1','Heading 2'):
+    # Existing measurement/plot builders remain the single content source.
+    # Case modules are collected as data, then compared by named endpoint.
+    paired_modules = []
+    active_case = None
+    active_module = None
+    def collecting():
+        return active_case is not None and active_module is not None
+    doc=Document() if document is None else document
+    section=doc.sections[0] if document is None else doc.add_section(WD_SECTION_START.NEW_PAGE)
+    section.orientation=WD_ORIENT.LANDSCAPE
+    # Match the shared engineering report's Letter landscape sections.
+    section.page_width=Cm(27.94);section.page_height=Cm(21.59)
+    section.top_margin=section.bottom_margin=Cm(1.3)
+    section.left_margin=section.right_margin=Cm(1.778)
+    for key in (() if document is not None else ('Normal','Title','Heading 1','Heading 2')):
         style=doc.styles[key];style.font.name='Calibri';style.element.get_or_add_rPr().rFonts.set(qn('w:eastAsia'),'微软雅黑')
         fonts=style.element.get_or_add_rPr().rFonts
         for attribute in list(fonts.attrib):
             if 'theme' in attribute.lower():del fonts.attrib[attribute]
         style.font.color.rgb=RGBColor(0,0,0)
         for border in list(style.element.iter(qn('w:pBdr'))):border.getparent().remove(border)
-    normal=doc.styles['Normal'];normal.font.size=Pt(10);normal.paragraph_format.space_after=Pt(5)
-    doc.styles['Title'].font.size=Pt(23);doc.styles['Heading 1'].font.size=Pt(16);doc.styles['Heading 2'].font.size=Pt(12)
+    if document is None:
+        normal=doc.styles['Normal'];normal.font.size=Pt(10);normal.paragraph_format.space_after=Pt(5)
+        doc.styles['Title'].font.size=Pt(23);doc.styles['Heading 1'].font.size=Pt(16);doc.styles['Heading 2'].font.size=Pt(12)
+    else:
+        section.header.is_linked_to_previous=False
+        section.footer.is_linked_to_previous=False
     footer=section.footer.paragraphs[0];footer.text='Power Design   |   '+evidence['model']+'   |   '
     field=OxmlElement('w:fldSimple');field.set(qn('w:instr'),'PAGE');footer._p.append(field)
-    def paragraph(text):return doc.add_paragraph(str(text))
+    def paragraph(text):
+        if collecting():
+            active_module['blocks'].append(dict(kind='paragraph', text=str(text)))
+            from types import SimpleNamespace
+            return SimpleNamespace(paragraph_format=SimpleNamespace(space_after=None))
+        p=doc.add_paragraph(str(text))
+        p.paragraph_format.line_spacing = 1.04
+        p.paragraph_format.space_after = Pt(4)
+        if document is not None:
+            for run in p.runs:run.font.size=Pt(10)
+        return p
     def fmt(value,unit=''):
         if value is None:return '未取得'
         if isinstance(value,str):return value
         number=float(value)
         return f'{number:.5g}'+(' '+unit if unit else '') if math.isfinite(number) else '无有效值'
-    def table(headers,rows,widths):
+    def table(headers,rows,widths,*,compact=False):
+        rows = list(rows)
+        if collecting():
+            active_module['blocks'].append(dict(kind='table', headers=list(headers), rows=rows))
+            return None
+        available=(section.page_width-section.left_margin-section.right_margin)/360000
+        if sum(widths)>available:
+            widths=[w*available/sum(widths) for w in widths]
         t=doc.add_table(rows=1,cols=len(headers));t.autofit=False
         for column,width in zip(t.columns,widths):column.width=Cm(width)
         borders=OxmlElement('w:tblBorders')
@@ -50,7 +217,8 @@ def write_report(path,evidence,*,chart_images=None):
                 if index<0 or index%2==0:
                     shade=OxmlElement('w:shd');shade.set(qn('w:fill'),'183B65' if index<0 else 'F1F5FA');cell._tc.get_or_add_tcPr().append(shade)
                 for p in cell.paragraphs:
-                    p.paragraph_format.space_before=Pt(2);p.paragraph_format.space_after=Pt(2);p.paragraph_format.line_spacing=Pt(12.5)
+                    spacing=1 if compact else 2
+                    p.paragraph_format.space_before=Pt(spacing);p.paragraph_format.space_after=Pt(spacing);p.paragraph_format.line_spacing=Pt(12 if compact else 12.5)
                     if j>0:p.alignment=WD_ALIGN_PARAGRAPH.CENTER
                     for run in p.runs:
                         run.font.size=Pt(9.5)
@@ -60,16 +228,35 @@ def write_report(path,evidence,*,chart_images=None):
             no_split=OxmlElement('w:cantSplit');row._tr.get_or_add_trPr().append(no_split)
         return t
     def page(title):
-        heading=doc.add_heading(title,1);heading.paragraph_format.page_break_before=True
+        nonlocal active_module
+        if active_case is not None:
+            prefix=active_case['id']+'  Vin '+fmt(active_case['voltage'],'V')
+            label=title[len(prefix):].strip() if title.startswith(prefix) else title
+            active_module=dict(case=active_case, title=label, blocks=[])
+            paired_modules.append(active_module)
+            return
+        heading=doc.add_heading(title,2 if document is not None else 1);heading.paragraph_format.page_break_before=True
+        return heading
     def chart(draw,height):
-        if prepared is not None:doc.add_picture(BytesIO(next(prepared)),width=Cm(25.8));return
+        if prepared is not None:
+            blob=next(prepared)
+            if collecting(): active_module['blocks'].append(dict(kind='chart',blob=blob))
+            else: doc.add_picture(BytesIO(blob),width=Cm(25.8))
+            return
         from matplotlib import rc_context
         from matplotlib.figure import Figure
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         with rc_context({'font.sans-serif':['Microsoft YaHei','DejaVu Sans'],'font.size':9,'axes.unicode_minus':False}):
-            fig=Figure(figsize=(10.1,height),layout='constrained');FigureCanvasAgg(fig);draw(fig)
+            fig=Figure(figsize=(4.72,min(height,4.85)) if collecting() else (9.6,height),layout='constrained');FigureCanvasAgg(fig);draw(fig)
+            if collecting():
+                import textwrap
+                for axis in fig.axes:
+                    axis.set_title('\n'.join(textwrap.wrap(axis.get_title(),16)),fontsize=9)
+                    axis.tick_params(labelsize=8)
+                    axis.xaxis.label.set_size(8);axis.yaxis.label.set_size(8)
             stream=BytesIO();fig.savefig(stream,format='png',dpi=170);stream.seek(0)
-            doc.add_picture(stream,width=Cm(25.8))
+            if collecting(): active_module['blocks'].append(dict(kind='chart',blob=stream.getvalue()))
+            else: doc.add_picture(stream,width=Cm(25.8))
     def axes_format(axes):
         for axis in np.asarray(axes,dtype=object).ravel():
             axis.grid(alpha=.2);handles,_=axis.get_legend_handles_labels()
@@ -82,18 +269,28 @@ def write_report(path,evidence,*,chart_images=None):
     def entry(value):return fmt(value) if value is not None else '未测到交越'
     settings=evidence['settings'];qr=evidence.get('topology')=='QR-FLYBACK';forward=evidence.get('topology')=='ACF-FORWARD'
     noniso=evidence.get('topology') in ('BUCK','BOOST');buck=evidence.get('topology')=='BUCK'
-    doc.add_paragraph('有源钳位正激计算精度复核报告' if evidence.get('precision_summary') else '仿真与设计计算对比报告','Title')
+    doc.add_paragraph(('5 电路仿真与设计对照' if document is not None else '有源钳位正激计算精度复核报告' if evidence.get('precision_summary') else '仿真与设计计算对比报告'), 'Heading 1' if document is not None else 'Title')
     paragraph(datetime.now().strftime('%Y年%m月%d日')+'    '+evidence['model']+('    '+evidence['topology']+' 控制器逻辑参考' if noniso else '    准谐振反激 L6565 逻辑参考' if qr else '    有源钳位正激 MP6005 逻辑参考' if forward else '    固定频率反激 SSR'))
     paragraph('本报告用同一套 L/DCR、MOS、二极管及并联 C/ESR 对照计算与实际 LTspice 开关仿真。先检查直流收敛和逐周期重复性，再评估电感、MOS、D1 电流、输出纹波、开关闭环 FRA 和负载阶跃。输入两端分别验证；单路交叉调整率不适用。数值不同、未收敛和缺失测量均保留。' if noniso else '本报告用同一套冻结磁件与器件，对照设计计算和实际 LTspice 开关仿真。先检查直流收敛及逐周期重复性，再评估原副边电流、各路输出纹波、开关闭环 FRA 与 min/max 负载交叉调整率。数值不同、未收敛与缺失测量均保留，不能据此视为硬件已验证合格。')
     if evidence.get('calculation_revision_note'):paragraph(evidence['calculation_revision_note'])
+    if evidence.get('plan'):
+        from spice_planning import plan_text
+        paragraph('本次任务范围：'+plan_text(evidence['plan']))
+        reused=sum(c.get('cache',{}).get('hit',False) for c in evidence['cases'])
+        if evidence.get('review_origin'):
+            paragraph(evidence['review_origin'])
+        else:
+            paragraph(f"本次仿真及数据准备耗时 {evidence.get('simulation_wall_s',0):.1f} s（不含报告排版）；复用 {reused} 个已通过的标称工况。未选择的测试不属于本报告验证范围。")
     paragraph('电压节点统一：输出、负载功率和交叉调整率取防反管后 outN；反馈取防反管前电容端 capN。主反馈目标为端口设定电压加该路固定防反压降。未启用防反管时两节点重合。')
     table(['工况','Vin / V','主反馈输出 / V','逐周期检查','实际 FRA','交叉调整率'],[
         (c['id'],fmt(c['voltage']),f"OUT{c.get('feedback_output',1)} "+fmt(c['measurements'].get(f"out{c.get('feedback_output',1)}_before")),
-         c.get('periodicity',{}).get('reason','未完成'),
-         '已测并通过复核' if c.get('loop',{}).get('available') else '待复核 / 未执行',
-         '完整' if c.get('cross',{}).get('complete') else '部分 / 不适用 / 未执行') for c in evidence['cases']],
+         '保护动作，标称对比未完成' if c.get('protection_stop') else c.get('periodicity',{}).get('reason','未完成'),
+         '未选择' if not settings['fra_enabled'] else '已测并通过复核' if c.get('loop',{}).get('available') else '待复核 / 未执行',
+         '未配置轻重载范围' if evidence.get('plan',{}).get('cross_skip_reason') else
+         '未选择' if not settings['cross_enabled'] else '计算与仿真完成' if c.get('cross',{}).get('complete') else
+         '仿真完成 / 计算待补' if c.get('cross',{}).get('simulation_complete') else '部分 / 不适用 / 未执行') for c in evidence['cases']],
         [5.3,1.6,3.2,5.1,5,5.6])
-    doc.add_heading('本报告的判定规则',1)
+    doc.add_heading('本报告的判定规则',2 if document is not None else 1)
     paragraph('QR 周期按实际门极上升沿划分，统计频率范围、脉宽、峰值和谷底开通电压。变频或跳谷不直接判为失稳；不能形成可重复工作点时不发布有效 FRA 裕度。' if qr else '平均输出电压变化小，不等于不存在大小波。周期检查统计末段 64 个时钟的脉宽、峰值电流、停脉冲与周期二交替；未通过时不将标称偏差标为通过，也不据此给出有效线性化 FRA。')
     paragraph('FRA 使用 LTspice 原生时域注入，并以半幅在关键频点复核；频带限制在 fsw/10 以内。无增益或相位交越表示本次频带没有测到，不写成无限裕度。交叉调整率只统计末段已收敛、无保护的角点均值；阶跃过冲不作为交叉调整率。')
     paragraph('表中平均值、RMS 和极值优先来自 .meas；纹波 AC RMS 以实际 RAW 的时间加权积分计算。图片为重采样概览，不用图上采样点替代数值统计。')
@@ -124,12 +321,13 @@ def write_report(path,evidence,*,chart_images=None):
         if chunk_index:page('控制器与仿真配置续')
         if len(chunk)%2:chunk.append(('',''))
         half=len(chunk)//2
-        table(['配置项','配置','配置项','配置'],[(*chunk[i],*chunk[i+half]) for i in range(half)],[6.4,6.5,6.4,6.5])
+        table(['配置项','配置','配置项','配置'],[(*chunk[i],*chunk[i+half]) for i in range(half)],[6.4,6.5,6.4,6.5],compact=qr)
     if qr:
         page('QR 模型与参数来源')
         paragraph('主界面的 f_sw 是 QR 设计频率上限；导出参数 FSW 仅用于测量窗口、步长和 FRA 设置，没有固定频率振荡器。ZCD 经 RC、钳位与检测延时触发开通，CS 比较触发关断。')
         paragraph('L6565 阈值与时序依据 ST 数据手册：https://www.st.com/resource/en/datasheet/l6565.pdf。参考资料不是硅模型验证证明。用户参考库的自定义启动保持、硬编码定时器未直接移植。')
-        for note in (evidence['cases'][0].get('approximation_notes',[]) if evidence['cases'] else []):paragraph(note)
+        for note in (evidence['cases'][0].get('approximation_notes',[]) if evidence['cases'] else []):
+            paragraph(note).paragraph_format.space_after=Pt(1)
     elif noniso:
         page('Buck / Boost 控制器与计算口径')
         for note in (evidence['cases'][0].get('approximation_notes',[]) if evidence['cases'] else []):paragraph(note)
@@ -166,10 +364,44 @@ def write_report(path,evidence,*,chart_images=None):
             paragraph('上述为 CCM、固定压降和小钳位纹波近似。计算器标称工作点仍保留预设效率的等效负担；物理 SPICE 直接计算实际器件损耗，不额外乘预设效率。漏感换流会减少副边有效传能时间，轻载路还可能进入 DCM，因此不应期待各路电压、占空比和电流按理想匝比严格吻合。')
             paragraph('交叉负载表另列独立直流近似，包含 CCM/DCM、DCR 与一阶换流损失；它不是完整两两矩阵解。实际开关闭环 FRA、各支路电流和纹波分别作为验证证据，不用直流近似代替开关仿真。')
     for case in evidence['cases']:
+        active_case=case
         title=case['id']+'  Vin '+fmt(case['voltage'],'V')
         page(title+' 运行与稳态检查')
+        cache=case.get('cache',{})
+        if case.get('evidence_origin'):
+            paragraph(case['evidence_origin'])
+        else:
+            paragraph(('复用通过检查的既有仿真，原运行时间 '+cache.get('created_at','未记录')+'；本次未重新启动 LTspice。' if cache.get('hit') else '实际 LTspice 运行记录，执行时间以原证据为准。')+
+                f" 原始批处理耗时 {case.get('elapsed_s',0):.1f} s；该记录的工况处理耗时 {case.get('wall_elapsed_s',0):.1f} s。")
         if not case['complete']:
-            paragraph('本工况未完整完成，不提供有效对比结论。'+case.get('error','未取得数据'));continue
+            paragraph(case.get('error','工况未完成'))
+            trip=case.get('protection_stop')
+            if trip:
+                ctrl=case['controller']
+                table(['现场量','观测值'],[
+                    ('瞬态记录终点',fmt(case['actual_end_s']*1000,' ms')),
+                    ('首次 FAULT 动作',fmt(trip['first_trip_s']*1000,' ms')),
+                    ('动作支路',trip['cause']),
+                    ('触发前一周期内滤波 CS 峰值',fmt(trip.get('filtered_cs_peak_v'),' V')),
+                    ('触发前一周期内原边绕组电流峰值',fmt(trip.get('primary_peak_a'),' A')),
+                    ('阶跃前窗口占空比',fmt(case['measurements'].get('duty_avg'))),
+                ],[14,11.8])
+                if ctrl.get('SCMODE')==1:
+                    paragraph('打嗝关断设定为 '+fmt(ctrl['TOFF']*1000,' ms')+'。请先核对上电时的最小导通时间、逐周期复位及磁件峰值电流。')
+                data=case['startup']
+                def protection_chart(fig):
+                    axes=fig.subplots(1,2)
+                    times=np.asarray(data['time'])*1000
+                    for key in data:
+                        if key.startswith('v(out'):axes[0].plot(times,data[key],label=key)
+                    axes[0].set(title='保护动作前后的各路输出',xlabel='时间 / ms',ylabel='V')
+                    axes[1].plot(times,data['v(fault)'],label='FAULT')
+                    axes[1].plot(times,data['v(ss)'],label='SS')
+                    axes[1].set(title='首次保护动作',xlabel='时间 / ms',ylabel='归一化电平',
+                                xlim=(0,min(times[-1],max(trip['first_trip_s']*1600,.05))))
+                    axes_format(axes)
+                chart(protection_chart,2.6)
+            continue
         quality=case['periodicity'];ctrl=case['controller']
         paragraph('实际运行至 '+fmt(case['actual_end_s']*1000,'ms')+'。'+quality['reason']+'；脉宽范围 '+fmt(quality['duty_min']*100,'%')+' 至 '+fmt(quality['duty_max']*100,'%')+'，峰值电流周期间跨度 '+fmt(quality['peak_span_percent'],'%')+'。')
         paragraph(('QR 无固定时钟人工斜坡；' if qr else '设计斜坡 '+fmt(case['slope']['design'],'V/s')+'；实际仿真斜坡 '+fmt(case['slope']['resolved'],'V/s')+'。')+('故障测试只观察保护行为，不对标称设计判差。' if case['fault_test'] else '同一输入端点比较，非反馈路不被强制为名义电压。'))
@@ -203,18 +435,42 @@ def write_report(path,evidence,*,chart_images=None):
             axes[1,1].plot(t,data['v(ramp)'],label='滤波 CS × 增益' if qr else '滤波 CS × 增益 + 人工斜坡')
             axes[1,1].set(title='实际 PWM 比较信号',xlabel='时间 / μs',ylabel='V');axes_format(axes)
         chart(primary,5.5)
+        if not forward and not noniso:
+            paragraph('原边绕组电流与励磁电流分开定义：耦合计算采用 i_primary，理想反激采用开关导通电流。')
         if qr:
             page(title+' QR 变频与谷底开通检查')
+            startup_info=case.get('qr_startup',{})
+            stress_rows=[]
+            if startup_info.get('vds_peak_full_v') is not None:
+                stress_rows.append(('全程 Vds 峰值 / 发生时刻',fmt(startup_info['vds_peak_full_v'],'V')+' / '+fmt(startup_info['vds_peak_full_s']*1000,'ms')))
+            if startup_info.get('available'):
+                stress_rows.append((f'启动期门极上升沿前 50 ns 主反馈OUT{startup_info.get("feedback_output",1)}副边电流最大值 / 边沿时刻',
+                    fmt(startup_info['max_pre_current_a'],'A')+' / '+fmt(startup_info['max_gate_rise_s']*1000,'ms')))
+            for name,item in startup_info.get('windings',{}).items():
+                if item.get('available'):
+                    stress_rows.append((name+' 启动期门极上升沿前50 ns副边电流最大值 / 边沿时刻',
+                        fmt(item['max_pre_current_a'],'A')+' / '+fmt(item['max_gate_rise_s']*1000,'ms')))
+            stress_rows.append(('额定负载测量窗内 Vds 峰值',fmt(case['measurements'].get('vds_peak'),'V')))
+            if case['qr'].get('primary_snubber_c_f'):
+                stress_rows.append(('Q1 串联 RC 吸收 R / C / 额定负载电阻耗散',
+                    fmt(case['qr']['primary_snubber_r_ohm'],' Ω')+' / '+fmt(case['qr']['primary_snubber_c_f']*1e12,' pF')+' / '+fmt(case['measurements'].get('qr_rc_loss'),' W')))
             table(['项目','测量或设计值'],[
                 ('设计频率上限 / Hz',fmt(case['qr']['frequency_limit_hz'])),
                 ('计算实际频率 / Hz',fmt(case['qr']['design_frequency_hz'])),
                 ('仿真实际频率 均值 / 最小 / 最大 Hz',' / '.join(fmt(quality.get(k)) for k in ('frequency_mean_hz','frequency_min_hz','frequency_max_hz'))),
                 ('开通前 Vds 平均值 / V',fmt(quality.get('turnon_vds_mean_v'))),
-                ('开通前局部谷底 Vds 平均值 / V',fmt(quality.get('valley_vds_mean_v'))),
-                ('设计 Coss / 仿真有效 Cds pF',fmt(case['qr']['design_coss_f']*1e12)+' / '+fmt(case['qr']['cds_f']*1e12)),
+                ('关断后半段低门极期间最低 Vds 均值 / V' if quality.get('valley_window') else '旧版关断窗口最低 Vds 均值 / V',fmt(quality.get('valley_vds_mean_v'))),
+                ('设计 Coss / 网表 Q1 Coss 参数 (pF)',fmt(case['qr']['design_coss_f']*1e12)+' / '+fmt(case['qr']['cds_f']*1e12)),
                 ('ZCD 解析附加延时 / ns',fmt(ctrl['ZDELAY']*1e9)),
-            ],[13,12.8])
-            paragraph('开通 Vds 在门极达到切换阈值前 50 ns 读取，谷底来自同一关断末段的局部最小值。正的谷底电压表示谷底开通，不能称为真正零电压开通。ZCD 负载、非线性 Coss 与布局寄生尚需实物复核。')
+            ]+stress_rows,[13,12.8],compact=True)
+            if case['qr'].get('extra_body_cj_f'):
+                paragraph('此兼容网表另含 MOS 体二极管结电容 '+fmt(case['qr']['extra_body_cj_f']*1e12,' pF')+'。')
+            if startup_info.get('available'):
+                paragraph('门极开通前仍有较大的正向副边电流时，请同步核对对应各路 I(LSn)、ZCD 和 Vds，判断是否在退磁完成前被换流振铃触发；辅助绕组不因不是主反馈而省略检查。')
+            paragraph('开通前 Vds 取门极达到切换阈值前 50 ns 的电压。'
+                +('另一栏取同一关断后半段、Vgs 低于驱动幅值 10% 时实际观测到的最低 Vds。是否在自然谷底开通，还需对照门极边沿和 Vds 波形。' if quality.get('valley_window')
+                else '本次存档的旧版最低值窗口可能包含前一次关断边沿，需结合波形复核。')
+                +' ZCD 负载、非线性 Coss 与布局寄生需实物复核。')
             if case.get('switching',{}).get('v(zcd)') is not None:
                 def qr_signals(fig):
                     axes=fig.subplots(2,1);data=case['switching'];t=(np.array(data['time'])-data['time'][0])*1e6
@@ -222,8 +478,8 @@ def write_report(path,evidence,*,chart_images=None):
                     axes[0].set(ylabel='V',title='退磁后的漏极谐振与实际开通位置')
                     for key in ('v(zcd)','v(gate)'):axes[1].plot(t,data[key],label=key)
                     axes[1].set(xlabel='时间 / μs',ylabel='V',title='ZCD 下降触发与门极脉冲');axes_format(axes)
-                chart(qr_signals,3.0)
-            paragraph('计算与仿真波形按各自真实周期绘制。QR 环路使用峰值电流控制的周期平均低频近似，实际时域 FRA 用于核对模型和工作点。')
+                chart(qr_signals,2.5)
+            paragraph('计算与仿真波形保留各自周期。QR 环路使用峰值电流控制的周期平均低频近似，实际时域 FRA 用于核对模型和工作点。')
         if forward:
             page(title+' 有源钳位时序与磁复位')
             check=case.get('acf_timing',{});m=case['measurements']
@@ -247,7 +503,6 @@ def write_report(path,evidence,*,chart_images=None):
             chart(clamp_signals,3.)
             paragraph('SYNC 高电平关断 P 管、低电平允许其导通；辅助栅极为理想 AC 电平移位。伏秒检查扣除原边 DCR 压降，按完整 64 周期积分。模型不含磁芯饱和、真实 AC 耦合驱动下垂或器件非线性结电容；不能据此保证 ZVS。')
         elif noniso:paragraph('L1 为物理储能／滤波电感，D1 为实际续流／整流支路；不存在变压器原副边。所有 RMS/平均值均统计完整周期。')
-        else:paragraph('原边绕组电流与励磁电流分开定义：耦合计算采用 i_primary，理想反激采用开关导通电流；不再把关断期间的励磁下降斜坡当作外部原边电流叠加。')
         for branch in case.get('branches',[]):
             i=branch['id'];page(title+f' OUT{i} '+branch.get('name','')+(' 二极管电流与输出纹波' if noniso else ' 副边电流与输出纹波'))
             metric_table([r for r in case['rows'] if r['metric'].startswith(f'OUT{i} ')])
@@ -284,8 +539,36 @@ def write_report(path,evidence,*,chart_images=None):
                     axes[1].set(title='整流与续流电流分配',xlabel='时间 / μs',ylabel='A');axes_format(axes)
                 chart(choke_signals,3.4)
                 paragraph('续流电流图由 LO−整流绕组电流得到，含结电容换流时并非独立二极管端口实测；整流与续流管的反压均可能含寄生尖峰。选型仍需留有余量并实测。')
+        boundary=case.get('capacitor_boundary')
+        if boundary and not case['fault_test']:
+            page(title+' 副边电流与电容动态复算')
+            if boundary.get('available'):
+                paragraph('每颗并联电容分别储存电荷，并按自身 ESR 分流。复算联立绕组互感、二极管换流和电容周期电荷平衡，只使用设计参数。')
+                rows=[]
+                current_rows={r['metric'].replace(' ',''):r for r in case['rows']}
+                for branch in case['branches']:
+                    rail=branch['id']
+                    supplemental=branch.get('capacitor_boundary',{})
+                    for metric,key in [('平均值','average_a'),('RMS','rms_a'),('峰值','peak_a')]:
+                        row=current_rows.get(f'OUT{rail}副边电流'+metric,{})
+                        rows.append((f'OUT{rail}',metric,fmt(row.get('design')),fmt(supplemental.get(key)),fmt(row.get('simulation'))))
+                table(['绕组','电流统计','原设计 / A','逐颗 C+ESR 复算 / A','LTspice / A'],rows,[3,4.2,5.8,6.8,6])
+                shapes=[]
+                for b in case['branches']:
+                    shape=b.get('current_shape',{})
+                    if all(shape.get(k) is not None for k in ('design_fraction','simulation_fraction')):
+                        shapes.append(f"OUT{b['id']} 为 {100*shape['design_fraction']:.1f}% / {100*shape['simulation_fraction']:.1f}%")
+                if shapes:
+                    paragraph('在图示的五个周期中，电流超过各自正峰 5% 的时间占比（原设计 / LTspice）为 '+ '，'.join(shapes)+'。')
+                paragraph('平均电流主要受负载与每周期传输电荷约束。即使平均值接近，换流时的脉冲宽度、长尾和波峰仍会影响 RMS 与峰值。')
+                paragraph('复算沿用固定二极管压降与理想 Kc 钳位。实际导出的开关电路还包含 RCD 充放电、有限开关边沿及结电容。表中保留各自预测，便于判断哪些差异仍待复核。')
+            else:
+                paragraph('本工况未取得有效的动态复算。'+str(boundary.get('error','请查看模型适用范围。')))
         if case['fault_test']:continue
-        loop=case.get('loop',{});page(title+' 环路增益与裕度对比')
+        # The cover records omitted studies; quick preflight needs no empty
+        # FRA/cross-regulation pages for each input endpoint.
+        if not settings['fra_enabled'] and not settings['cross_enabled']:continue
+        loop=case.get('loop',{});page(title+(' 环路增益与裕度对比' if settings['fra_enabled'] else ' 交叉调整率检查'))
         if not loop.get('simulation'):
             paragraph('没有有效的开关闭环 FRA 数据：'+str(loop.get('error') or '未执行'))
         else:
@@ -309,7 +592,7 @@ def write_report(path,evidence,*,chart_images=None):
                     axes[0].semilogx(data['f'],data['db'],style,label=label);axes[1].semilogx(data['f'],data['phase'],style,label=label)
                 axes[0].axhline(0,c='gray',lw=.7);axes[1].axhline(-180,c='gray',lw=.7)
                 axes[0].set(title='开环增益幅值',xlabel='Hz',ylabel='dB');axes[1].set(title='开环增益相位',xlabel='Hz',ylabel='deg');axes_format(axes)
-            chart(bode,3.35)
+            chart(bode,2.7)
             paragraph('采用测得频带中的交越，存在多个 0 dB 交越时列出较小相位裕度。未测到相位交越不写成无限增益裕度。参数重建仍保留计算器功率级近似；CS 滤波、消隐及开关寄生没有在计算模型中完整反映，不要求两条曲线必然重合。')
             page(title+' 功率级与补偿器频率响应')
             def components(fig):
@@ -334,19 +617,24 @@ def write_report(path,evidence,*,chart_images=None):
         if not cross.get('supported'):
             paragraph('交叉调整率：'+str(cross.get('error') or '不适用或未启用'));continue
         page(title+' 交叉调整率与电压包络')
-        if not cross.get('supported') or not cross.get('summary'):
+        if not cross.get('supported') or not cross.get('summary') or not cross.get('records'):
             paragraph('未取得交叉调整率结果：'+str(cross.get('error') or '未执行或不适用'))
         else:
             paragraph(cross['coverage']+'。'+cross['note'])
+            if cross.get('error'):paragraph('本次角点任务未完整结束：'+str(cross['error']))
             if cross.get('design_note'):
                 paragraph('计算侧采用与标称相同的完整 kij 周期解、钳位与各路电荷平衡；不拟合仿真值。电压网格与高频电流网格分别检查，电流敏感的角点仅对直流电压包络给出有效结果。模型边界见前文。' if case.get('calculation_model') else cross['design_note'])
             paragraph(f"计划 {cross.get('total_cases',len(cross['records']))} 组，实际完成 {cross.get('simulated_cases',len(cross['records']))} 组；末段收敛 {cross.get('settled_cases',sum(r['settled'] for r in cross['records']))} 组，计算解有效 {cross.get('design_valid_cases',sum(r.get('design') is not None for r in cross['records']))} 组。")
-            paragraph('全部角点完成且收敛。' if cross['complete'] else '覆盖或收敛尚不完整：以下为已收敛角点的观察包络，不作为完整负载范围的极值承诺。')
+            paragraph(('计划内角点的计算与仿真均完成且收敛。' if cross['complete'] else
+                '角点仿真已完成，计算对比尚不完整。' if cross.get('simulation_complete') else
+                '角点计算已完成，实际仿真尚不完整。' if cross.get('design_complete') else
+                '计算与仿真覆盖或收敛尚不完整。')+
+                '以下仅统计各自有效的角点；重点角点和离散包络不构成连续负载区间的严格极值承诺。')
             summary=cross['summary'];rows=[]
             for calc,actual in zip(summary['design'],summary['simulation']):
                 rows.append((f"OUT{calc['id']}"+(' 主反馈' if calc['feedback'] else ''),
                     fmt(calc['V_min'])+' ～ '+fmt(calc['V_max']),fmt(actual['V_min'])+' ～ '+fmt(actual['V_max']),
-                    fmt(0 if abs(calc['cross_only_pct'])<1e-8 else calc['cross_only_pct']),fmt(actual['cross_only_pct']),
+                    fmt(0 if calc['cross_only_pct'] is not None and abs(calc['cross_only_pct'])<1e-8 else calc['cross_only_pct']),fmt(actual['cross_only_pct']),
                     '完整' if calc['complete'] and actual['complete'] else '部分'))
             table(['输出','计算 Vmin 至 Vmax / V','仿真 Vmin 至 Vmax / V','计算交叉变化 / %','仿真交叉变化 / %','覆盖'],rows,[3.2,6,6,4,4,2.6])
             paragraph('“交叉变化”保持该路自身负载及 Vin 不变，仅改变其它路负载，取最大电压跨度除以该路参考电压；电压包络则包含自身负载变化。反馈只闭合所选一路，不能把所有输出视为独立稳压。')
@@ -357,7 +645,8 @@ def write_report(path,evidence,*,chart_images=None):
                 for record in cross['records']:
                     axis.axvline(record['end_s']*1000,c='gray',lw=.5,alpha=.5)
                 axis.set(title='各路负载角点切换与输出平均电压的收敛过程',xlabel='时间 / ms',ylabel='V');axes_format([axis])
-            chart(cross_wave,2.7 if len(rows)<=3 else 2.2)
+            if cross.get('waveform'):chart(cross_wave,2.7 if len(rows)<=3 else 2.2)
+            else:paragraph('未取得角点切换过程波形；已保存的独立有效测量仍按其来源列出。')
             page(title+' 交叉调整率角点明细')
             rows=[]
             for record in cross['records']:
@@ -381,6 +670,8 @@ def write_report(path,evidence,*,chart_images=None):
                         if key!='time':a.plot(t,y,label=key)
                     a.set(title='固定负载从零启动与末段收敛',xlabel='时间 / ms',ylabel='V');axes_format([a])
                 chart(retry_chart,4.)
+    active_case = active_module = None
+    _render_endpoint_modules(doc, paired_modules, table, paragraph, page)
     page('计算口径与复核边界')
     equation(doc,'δ=100%×','S−C','C')
     paragraph('S 为仿真值，C 为设计值。只对相同工况、量纲且通过有效性检查的非零基准计算有符号偏差。频带、模式、寄生或统计口径不同的值仅并列展示。')
@@ -388,12 +679,16 @@ def write_report(path,evidence,*,chart_images=None):
         paragraph('三个原型均为原创可配置行为模型；本轮不包含独立原厂模型验证。反馈为理想电阻比例，误差放大器由二／三型传递函数实现，尚未覆盖芯片全部模拟特性及保护模式。')
         paragraph('快速闭环关闭 Coss/Cj 和门电容边沿，不用于尖峰或动态开关损耗签核；可选常数结电容模式保留这些近似。计算周期模型不含这些快边沿、ESL、传播延时或反向恢复，实际器件与样机仍需复核。')
         paragraph('ZIP 保留完整输入、模型、两端工程、日志、实际 FRA 复数 RAW 和 comparison.json。单路负载阶跃已在启动图中展示；多路交叉调整率不适用。普通大瞬态 RAW 不打包，可按工程重跑。')
-        Path(path).parent.mkdir(parents=True,exist_ok=True);doc.save(path);return
+        if save:
+            Path(path).parent.mkdir(parents=True,exist_ok=True);doc.save(path)
+        return doc
     for text in (
-        ('QR 采用 L6565 逻辑参考，单路 SSR 事件驱动模型；用户参考库仅用于研究，不等同厂家认证模型。外部参考缓升、理想 VCC、理想辅助电压映射与看门狗均为明确假设。' if qr else '通用固定频率 SSR 控制器参考 MP6005 的公开时序，不是完整芯片模型。人工斜坡、外部 CS 滤波、SCP 独立消隐和部分器件寄生为显式工程参数，需用目标芯片或实测复核。'),
+        ('QR 采用 L6565 逻辑参考的 SSR 事件驱动模型；多绕组仅所选一路闭环，其他各路保留实际绕组、整流管、电容和负载。启用非理想耦合矩阵且变频周期校验通过时，交叉负载计算采用独立绕组换流、退磁时序及各路电荷平衡；未取得该解时计算列留空，不用名义匝比冒充交叉调整率。环路仍使用各路负载和电容折算的低频近似，不能将角点求解等同完整多输出动态模型。实际电路另保留电容变化与开关寄生。用户参考库仅用于研究，不等同厂家认证模型。外部参考缓升、理想 VCC、理想辅助电压映射与看门狗均为明确假设。' if qr else '通用固定频率 SSR 控制器参考 MP6005 的公开时序，不是完整芯片模型。人工斜坡、外部 CS 滤波、SCP 独立消隐和部分器件寄生为显式工程参数，需用目标芯片或实测复核。'),
         'MOS 为 Ron、常数 Coss、等效门电容和受控开关；二极管为固定 Vf 与通用结电容。未完整建模反向恢复、温度和器件非线性。磁芯为线性模型，不包含饱和与磁芯损耗。',
         ('正激矩阵周期模型与实际 SPICE 均包含 kij 和物理钳位；计算器仍采用刚性电容端和理想门极边沿，波形峰值对寄生与网格敏感。未启用矩阵时保留显式标称近似。差异用于定位模型缺项，不拟合仿真曲线。' if forward else '计算器耦合周期模型与完整 SPICE 在输出电容变化、ESR/ESL 和开关寄生方面存在差异；FRA 与交叉调整率用于找出这些差异，不修改结果使其人为吻合。'),
         '理想隔离反馈没有真实光耦/TL431 的延时及 CTR。开关 FRA 只验证该导出电路，不能替代实际反馈器件和样机 FRA。',
         'ZIP 保留全部输入、模型、各端点工程、日志、FRA 复数 RAW 和 comparison.json。普通瞬态大 RAW 不打包，可按工程重跑。模型与证据均未取得时保持空缺，不补零。'):
         paragraph(text)
-    Path(path).parent.mkdir(parents=True,exist_ok=True);doc.save(path)
+    if save:
+        Path(path).parent.mkdir(parents=True,exist_ok=True);doc.save(path)
+    return doc

@@ -7,6 +7,10 @@
 | `desktop_entry.py`、`main.py` | 桌面系统画布与单元设计入口 |
 | `design_engine/` | 数据合同、计算调度与结果快照 |
 | `power_stage.py`、`loss_model.py`、`plants.py` | 功率级、损耗与小信号模型 |
+| `coupled_flyback.py`、`qr_coupled.py`、`cross_regulation.py` | 定频/QR矩阵换流与周期电荷平衡、固定硬件负载角点扫描；QR的谷底时序独立于定频PWM，小信号环路不冒充完整矩阵线性化 |
+| `parallel_wires.py`、`winding_layout.py`、`winding_positions.py` | 完整线并绕校验、共享截面排布与逐匝中心/碰撞检查；绘图、报告及建模共同消费 |
+| `winding_drag_ui.py`、`web_app/frontend/src/WindingCanvas.vue` | 桌面单图元拖动及网页 SVG 交互，不包含电气求解 |
+| `joint_simulation.py`、`joint_simulation_ui.py`、`joint_simulation_report.py` | 联合仿真调度与可实现裕量矩阵、桌面集中入口、单一Word证据报告；复用场解桥接和共享计算快照 |
 | `system_workspace.py`、`power_network.py` | 供电架构与预算 |
 | `shared/power_architecture.js` | 个人网页版共用的图形与连接交互 |
 | `web_app/frontend/` | Vue 界面与 TypeScript 计算模块 |

@@ -127,6 +127,8 @@ def project_files(parameters,*,bundle=None):
         'Boost 关闭 MOS 后输入仍会经电感、二极管给输出供电；短路保护不等于输入断路。',
         '电感为线性模型，不含饱和和磁芯损耗；电容 ESL 可选；二极管未建反向恢复；单路不适用交叉调整率，报告保留负载阶跃与输入两端对比。']
     notes.append('当前为快速闭环模式：Coss、Cj、等效栅电容关闭，不用于开关尖峰或器件动态损耗验证。' if not settings['niso_edge_model'] else '当前为常数结电容边沿模式，求解较慢；仍未包含电压相关电容与二极管恢复。')
+    if m['inductor'].get('design_enabled') is False:
+        notes.append('当前使用外购成品电感：L 和主界面的 DCR 同时用于计算与导出，控制器窗口的自制 DCR 覆盖不生效。用户附加损耗仅进入设计损耗汇总，不伪造对应的 SPICE 磁芯/交流损耗；未验证 L(I)、饱和或温升。')
     hardware=dict(kind='single-inductor',inductor=m['inductor'],L=q['L'],R_dc_p=m['dcr'],windings=[dict(id=1,Ns=0,R_dc=0,role='output-no-transformer')])
     meta=dict(schema='powerdesign-ltspice-1',model_version=MODEL_VERSION,topology=q['topology'],niso=d,
         controller_mode=q['control_mode'],feedback_output=1,settings=settings,resolved_controller=values,hardware=hardware,

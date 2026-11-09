@@ -14,6 +14,14 @@ NOTE = ('固定频率 SSR 反激的逐对耦合矩阵实验模型；固定磁芯
         '不是连续区间的严格极值，也不是负载阶跃过冲；不含 Coss/Cj、控制器跳周期与完整寄生谐振。'
         '0 W 真空载缺少泄放/预负载模型，不给出有限电压承诺。')
 SOURCE = 'https://www.ti.com/document-viewer/lit/html/SSZTCW3/GUID-9BE5B4A2-3166-4329-A3F0-4F836580FCC7'
+QR_NOTE = ('QR SSR 多路反激的矩阵换流与离散谷底稳态模型；固定同一套磁芯、整数匝数、线径、DCR、kij、'
+           '电容、器件及钳位参数，仅改变输入和声明的各路恒阻负载。主反馈在防反管前，输出范围在防反管后。'
+           '各路二极管电流独立求解，周期由导通、实际退磁及允许的谷底等待共同确定；不按功率比例分配。'
+           '参考点由Kc选定RCD后固定同一阻容，角点联立钳位电荷与电阻功耗平衡求平均钳位；不逐点重选R。'
+           '恒定Coss的理想无损谷底时序与稳态消隐近似不等于完整L6565芯片或寄生瞬态模型；'
+           '实际ZCD、非线性电容、轻载突发/失调及动态稳定性仍需电路仿真和样机复核。'
+           '0 W 真空载缺少明确泄放和间歇控制时不计算，不以微小假负载替代。')
+QR_SOURCE = 'https://www.st.com/resource/en/application_note/an1326-l6565-quasiresonant-controller-stmicroelectronics.pdf'
 
 
 def load_label(case):
@@ -47,7 +55,7 @@ def summarize(rails, cases, feedback):
 
 
 def scan_cross_regulation(p, *, reference_result=None, voltages=None,
-                          known_ops=None, cancelled=None, progress=None):
+                          known_ops=None, cancelled=None, progress=None, include_flyback_stress=False):
     from input_voltage_range import normalize_input_voltage_spec, _cancellation_scope
     from calculation_scheduler import check_calculation_cancelled, CalculationCancelled
     from isolated_outputs import output_specs
@@ -59,10 +67,12 @@ def scan_cross_regulation(p, *, reference_result=None, voltages=None,
     result = dict(supported=False,complete=False,feedback_output=int(base.get('feedback_output',1)),
                   rails=copy.deepcopy(rails),cases=[],summary=[],note=NOTE,source=SOURCE,
                   scope='min-max-load-corners-and-input-endpoints',error=None)
-    if (base['topology'] not in ('FLYBACK','ACF-FORWARD') or base.get('feedback_mode','SSR')!='SSR' or len(rails)<2
+    if (base['topology'] not in ('FLYBACK','QR-FLYBACK','ACF-FORWARD') or base.get('feedback_mode','SSR')!='SSR' or len(rails)<2
             or not base.get('coupling_config',{}).get('enabled')):
-        result['error']='需要至少两路输出、固定频率反激/有源钳位正激 SSR，并启用非理想绕组耦合矩阵。'
+        result['error']='需要至少两路输出、反激/准谐振反激/有源钳位正激 SSR，并启用非理想绕组耦合矩阵。'
         return result
+    if base['topology']=='QR-FLYBACK':
+        result.update(note=QR_NOTE,source=QR_SOURCE,model='qr-coupled-valley-steady-state')
     if base['topology']=='ACF-FORWARD':
         result['note']='正激物理周期/各路电荷平衡；固定同一硬件与完整 kij，单路主反馈，端口恒阻负载。包含钳位和恒定 Coss/Cj，不包含真实芯片 PSM、温度及非线性电容。高频电流网格敏感不等于直流电压包络未收敛；两项独立标注。'
         result['source']='https://www.ti.com/lit/an/slua535a/slua535a.pdf'
@@ -108,14 +118,32 @@ def scan_cross_regulation(p, *, reference_result=None, voltages=None,
                         op = op if op is not None else compute_operating_point(q)
                         if op.get('coupled_solution') is None and op.get('acf_solution') is None:
                             raise ValueError('没有物理耦合解，不使用理想匝比替代')
+                        if q['topology']=='QR-FLYBACK' and not (op.get('qr_coupled_model') or {}).get('converged'):
+                            raise ValueError('QR角点缺少已验证的变频矩阵/谷底稳态解，不使用标称匝比电压代替')
                         children = op['output_ops']
                         values = [float(r['V_out']) for r in children]
                         if any(not math.isfinite(v) or v<=0 for v in values):
                             raise ValueError('解算电压无效')
                         case.update(status='ok',voltages=values,D=float(op['D']),
+                                    f_sw=float(op['f_sw']) if op.get('f_sw') else None,
                                     actual_powers=[float(r['P_out']) for r in children],
                                     modes=[r.get('branch_mode',r['mode']) for r in children],
                                     residual=(op.get('coupled_model') or op['acf_model'])['normalized_residual'])
+                        if q['topology']=='QR-FLYBACK':
+                            model=op['qr_coupled_model']
+                            case['qr_timing']={key:copy.deepcopy(model[key]) for key in
+                                ('timing_policy','valley_index','T_on','T_demag','T_ring','off_blanking_s',
+                                 'frequency_hz','energy_balance_relative','design_frequency_limit_hz',
+                                 'design_frequency_limit_exceeded','rcd_policy','rcd_hardware',
+                                 'clamp_voltage','rcd_power_balance_W','rcd_ripple_upper_relative') if key in model}
+                        if include_flyback_stress and op['topology']=='FLYBACK':
+                            from flyback_clamp import rcd_components
+                            clamp=rcd_components(op,q)
+                            case['stress']=dict(vds=float(op['V_sw_max']),peak=float(op['I_sw_pk']),
+                                vrrm=[float(r['V_d_max']) for r in children],
+                                sense_loss=q['Rs']*float(op['I_sw_rms'])**2,
+                                clamp_loss=float(clamp['P_res']),rcd_c=float(clamp['C_snub']),
+                                rcd_r=float(clamp['R_snub']) if math.isfinite(clamp['R_snub']) else None)
                     except CalculationCancelled:
                         raise
                     except Exception as exc:

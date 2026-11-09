@@ -86,9 +86,18 @@ class PeriodicForward:
         stamp=np.zeros(self.size);stamp[self.base]=1;stamp[self.base+1]=-1;stamp[self.c]=-1
         self.A[self.base]-=stamp/esr;self.A[self.base+1]+=stamp/esr;self.A[self.c]+=stamp/esr
         self.cache={}
+        # Fixed diode incidence map: avoid rebuilding Python lists at every
+        # implicit time step and every active-set retry.
+        self._diode_map=np.zeros((2+2*n,self.nodes))
+        self._diode_map[0,0]=-1.;self._diode_map[1,1]=1.
+        for j in range(n):
+            self._diode_map[2+2*j,2+2*j]=1.
+            self._diode_map[2+2*j,3+2*j]=-1.
+            self._diode_map[3+2*j,3+2*j]=-1.
+        self._diode_threshold=np.r_[.8,.8,np.repeat(self.vf,2)]
 
     def _matrices(self,main,aux,bits):
-        key=(main,aux,tuple(bits))
+        key=(main,aux,bits.tobytes())
         if key in self.cache:return self.cache[key]
         a=self.A.copy();b=self.b.copy();offset=self.base
         if main:
@@ -112,10 +121,7 @@ class PeriodicForward:
         return a,b
 
     def _diodes(self,x):
-        v=x[self.v]
-        result=[-v[0]-.8,v[1]-.8]
-        for j in range(self.n):result.extend([v[2+2*j]-v[3+2*j]-self.vf[j],-v[3+2*j]-self.vf[j]])
-        return np.asarray(result)
+        return self._diode_map@x[self.v]-self._diode_threshold
 
     def cycle(self,initial,vo,duty,*,derivatives=False,trace=False):
         from calculation_scheduler import check_calculation_cancelled
@@ -128,6 +134,7 @@ class PeriodicForward:
         jac=np.column_stack((np.eye(size),np.zeros((size,n+1)))) if derivatives else None
         integral=np.zeros(n);charge_jac=np.zeros((n,size+n+1)) if derivatives else None
         bits=self._diodes(x)>0;cache={};history=[x.copy()];times=[0.];gates=[False];auxgates=[False];elapsed=0.
+        input_drive=self.B@vo
         for main,aux,duration,dduration,count in phases:
             h=duration/count;hd=dduration/count
             for tick in range(count):
@@ -135,17 +142,19 @@ class PeriodicForward:
                 before=x;previous_jac=jac
                 seen=set()
                 for attempt in range(24):
-                    signature=tuple(bits);key=(main,aux,signature,h)
+                    signature=bits.tobytes();key=(main,aux,signature,h)
                     if key not in cache:
                         a,b=self._matrices(main,aux,bits);m=self.E-h*a
                         inv=np.linalg.solve(m,np.eye(size))
-                        cache[key]=(inv@self.E,inv@(h*self.B),inv@(h*b),inv,a,b)
-                    flow,q,c,inv,a,b=cache[key]
-                    new=flow@before+q@vo+c
+                        q=inv@(h*self.B)
+                        cache[key]=(inv@self.E,q,q@vo,inv@(h*b),inv,a,b)
+                    flow,q,vo_drive,c,inv,a,b=cache[key]
+                    new=flow@before+vo_drive+c
                     drop=self._diodes(new)
                     updated=np.where(abs(drop)<1e-9,bits,drop>0)
-                    if np.array_equal(updated,bits):break
-                    if tuple(updated) in seen:
+                    updated_signature=updated.tobytes()
+                    if updated_signature==signature:break
+                    if updated_signature in seen:
                         # Numerical equality at the diode boundary is allowed,
                         # a finite conflicting forward voltage is not.
                         if max(abs(drop[updated!=bits]),default=0.)<1e-7:break
@@ -156,7 +165,7 @@ class PeriodicForward:
                 if derivatives:
                     jac=flow@previous_jac
                     jac[:,size:size+n]+=q
-                    jac[:,-1]+=hd*(inv@(a@x+b+self.B@vo))
+                    jac[:,-1]+=hd*(inv@(a@x+b+input_drive))
                     charge_jac+=h*(previous_jac[self.o]+jac[self.o])/2
                     charge_jac[:,-1]+=hd*(before[self.o]+x[self.o])/2
                 elapsed+=h

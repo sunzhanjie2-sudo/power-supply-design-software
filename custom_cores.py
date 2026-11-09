@@ -46,6 +46,9 @@ def validate_geometry(data):
 
 def validate_selected_cores(p):
     """Inactive custom drafts never affect a standard core calculation."""
+    from inductor_selection import purchased
+    if purchased(p):
+        return
     owner='_fixed_transformer' if p.get('topology') in ('FLYBACK','QR-FLYBACK','ACF-FORWARD') else '_fixed_inductor'
     if is_custom(p.get('core_choice')) and not (p.get(owner) or {}).get('core_geometry'):
         validate_geometry(p.get('custom_core',{}))

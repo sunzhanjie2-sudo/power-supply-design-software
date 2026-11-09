@@ -5,6 +5,40 @@ from pathlib import Path
 import numpy as np
 
 
+def protection_stop(raw, measured, frequency):
+    """Capture the first observed FAULT latch and its immediately preceding cycle."""
+    if measured.get('fault_max', 0) < .5 or 'v(fault)' not in raw.names:
+        return None
+    fault = raw.trace('v(fault)')
+    for first in range(0, len(fault), 250_000):
+        high = np.flatnonzero(fault[first:first+250_000] >= .5)
+        if high.size:
+            index = first + int(high[0])
+            break
+    else:
+        return None
+    when = float(raw.time[index])
+    begin = int(np.searchsorted(raw.time, when - 1 / frequency))
+    sample = slice(begin, index + 1)
+    def maximum(name):
+        if name in raw.names:
+            return float(np.max(raw.trace(name)[sample]))
+    scp = maximum('v(xu_ctrl:xsuper:scp)')
+    olp = maximum('v(xu_ctrl:olpt)')
+    qr_trip = maximum('v(xu_ctrl:trip)')
+    causes = []
+    if scp is not None and scp >= .5:
+        causes.append('SCP 短路比较器')
+    if olp is not None and olp >= 1:
+        causes.append('OLP 过载计时器')
+    if qr_trip is not None and qr_trip >= .5:
+        causes.append('QR 异常 CS 锁存')
+    filtered_cs = maximum('v(xu_ctrl:filtered)') if qr_trip is not None else maximum('v(xu_ctrl:cs_filtered)')
+    return dict(first_trip_s=when, cause='、'.join(causes) or '保护已动作，具体比较器待核对',
+                filtered_cs_peak_v=filtered_cs,
+                primary_peak_a=maximum('i(lp)'), fault_max=measured['fault_max'])
+
+
 def steady_quality(raw,frequency,end,outputs,*,window=.008,bins=16):
     """Reject slow startup/oscillation hidden by two short equal-mean windows.
 
@@ -61,8 +95,9 @@ def cycle_quality(raw,frequency,start,end,gate_voltage=10,cycles=64,tolerance_pc
         high=np.interp((boundaries[:-1]+boundaries[1:])/2,t,gate)>gate_voltage/2
         duty=float(np.sum(np.diff(boundaries)[high])/ts)
         a,b=np.searchsorted(t,[begin,finish]);values=current[a:b]
+        rises=edge_times[levels[inside]]
         rows.append(dict(clock=number,duty=duty,peak=float(max(values,default=0)),
-            pulses=int(np.count_nonzero(levels[inside]))))
+            pulses=len(rises),gate_rise_s=float(rises[0]) if len(rises)==1 else None))
     duty=np.array([x['duty'] for x in rows]);peak=np.array([x['peak'] for x in rows])
     def spread(x):return float(np.ptp(x)/max(abs(float(np.mean(x))),1e-9))
     alternation=float(abs(np.mean(duty[::2])-np.mean(duty[1::2]))/max(float(np.mean(duty)),1e-9))

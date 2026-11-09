@@ -18,6 +18,12 @@ class QRChecks(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.p=load_spec(json.loads((ROOT/'examples/90W_QR_L6565_300V_TUNED.json').read_text(encoding='utf-8')))
+        # This contract deliberately exercises the historical design-Coss=0,
+        # explicit 470pF controller override and missing-cap fallback. The
+        # purchasing example now uses a real 99pF device and must not silently
+        # redefine what the missing-cap/override tests are checking.
+        cls.p['Coss']=0.
+        cls.p['spice_config']['qr_cds_pf']=470.
         cls.bundle=calculate_parameters(cls.p,analysis='endpoints',include_loop=True,include_cross_regulation=False).runtime_bundle()
         cls.files=project_files(cls.p,bundle=cls.bundle)
 
@@ -54,6 +60,52 @@ class QRChecks(unittest.TestCase):
             self.assertTrue(set(n['values'])<=set(keys),n)
         self.assertIn('st.com',d['source'])
 
+    def test_qr_saves_only_its_actual_internal_probes(self):
+        import re
+        analysis=self.files['analysis.inc'].decode('ascii')
+        probes=set(re.findall(r'V\(xu_ctrl:([^)]*)\)',analysis,re.I))
+        self.assertEqual(probes,{'filtered','trip'})
+        lib=self.files['GenericQR_L6565.lib'].decode('ascii')
+        for name in probes:
+            self.assertRegex(lib,rf'(?m)^\w+ {name} ')
+        self.assertIn('.save V(zcd) V(vcc)',analysis)
+
+    def test_qr_latched_cs_evidence_is_recognized(self):
+        from spice_analysis import protection_stop
+        class Raw:
+            time=np.arange(6)*1e-6
+            names={'v(fault)': [0,0,0,1,1,1], 'v(xu_ctrl:trip)': [0,0,1,1,0,0],
+                   'v(xu_ctrl:filtered)': [0,0,2.1,2.,0,0], 'i(lp)': [0,2,3,2,0,0]}
+            def trace(self,name):return np.array(self.names[name])
+        evidence=protection_stop(Raw(),{'fault_max':1},50e3)
+        self.assertIn('QR 异常 CS',evidence['cause'])
+        self.assertEqual(evidence['filtered_cs_peak_v'],2.1)
+
+    def test_startup_gate_winding_evidence_excludes_steady_state_and_coarse_raw(self):
+        from qr_spice_analysis import startup_gate_current
+        class Raw:
+            def __init__(self, spacing):
+                self.time=np.arange(0,30e-6,spacing)
+            def trace(self,name):
+                t=self.time
+                traces={'v(ss)':np.minimum(t/15e-6,1), 'v(sense)':np.zeros_like(t),
+                        'v(gate)':np.where(((t%10e-6)>=2e-6)&((t%10e-6)<4e-6),10,0),
+                        'i(ls1)':np.where(t<9e-6,1.,np.where(t<18e-6,3.,90.))}
+                return traces[name]
+        observed=startup_gate_current(Raw(10e-9),28e-6,10)
+        self.assertEqual((observed['observed_edges'],observed['total_edges']),(2,2))
+        self.assertAlmostEqual(observed['max_gate_rise_s'],12e-6,delta=20e-9)
+        self.assertEqual(observed['max_pre_current_a'],3.)
+        self.assertFalse(startup_gate_current(Raw(2e-6),28e-6,10)['available'])
+        class VdsOnly:
+            time=np.array([0.,1e-6,2e-6,3e-6])
+            def trace(self,name):
+                return {'v(drain)':np.array([600.,580.,580.,320.]),
+                        'v(sense)':np.array([50.,1.,0.,0.])}[name]
+        peak=startup_gate_current(VdsOnly(),1e-6,10)
+        self.assertFalse(peak['available'])
+        self.assertEqual((peak['vds_peak_full_v'],peak['vds_peak_full_s']),(580.,2e-6))
+
     def test_actual_edges_are_independent_of_reference_clock(self):
         class Raw:
             time=np.arange(0,.003,20e-9)
@@ -66,6 +118,23 @@ class QRChecks(unittest.TestCase):
         self.assertTrue(a['stable']);self.assertAlmostEqual(a['frequency_mean_hz'],1/23.7e-6,delta=50)
         self.assertAlmostEqual(a['frequency_mean_hz'],b['frequency_mean_hz'])
         self.assertAlmostEqual(a['turnon_vds_mean_v'],180)
+
+    def test_turnoff_slew_is_not_reported_as_qr_valley(self):
+        # The conducted switch holds its drain low briefly at the first
+        # turn-off edge. The free off-state voltage later bottoms at 175 V.
+        class Raw:
+            time=np.arange(0.,340e-6,5e-9)
+            def trace(self,name):
+                phase=np.mod(self.time,20e-6)
+                on=phase<6e-6
+                return {'v(gate)':np.where(on,10.,0.),
+                    'v(sense)':np.zeros_like(phase),'i(lp)':np.where(on,1.,0.),
+                    'v(drain)':np.where(phase<6.08e-6,1.,np.where(phase<19.8e-6,300.,175.))}[name]
+        raw=Raw()
+        for reference in (40e3,100e3):
+            quality=cycle_quality(raw,reference,5e-6,335e-6)
+            self.assertEqual(quality['valley_vds_mean_v'],175.)
+            self.assertEqual(quality['turnon_vds_mean_v'],175.)
 
 
 if __name__=='__main__':unittest.main()

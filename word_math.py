@@ -9,6 +9,8 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 ALIASES = {
+    'Kpin':'K_P,COMP',
+    'PL':'P_L','ILrms':'I_L,rms','Pextra':'P_extra',
     'Iin':'I_in','Iout':'I_out','Idiv':'I_div','Iq':'I_q',
     'Pchip':'P_chip','Tj':'T_j','Ta':'T_a','θja':'θ_ja',
     'Vout':'V_out','Vblock':'V_block','Vinbus':'V_in,bus','Vclamp':'V_clamp','Rload':'R_load',
@@ -28,6 +30,7 @@ ALIASES = {
     'Reff':'R_eff',
     'Ns_j':'N_s,j','Ns_b':'N_s,b','V_j,est':'V_j,est',
     'Acu_j':'A_Cu,j','nstrand_j':'n_strand,j','d_j':'d_j',
+    'nparallel_j':'b_j','nparallel':'b',
     'J_j':'J_j','Irms_j':'I_rms,j','Rdc_j':'R_dc,j',
     'P_j':'P_j','V_j':'V_j','I_j':'I_j','w_j':'w_j','N_j':'N_j','N_1':'N_1','V_1':'V_1',
     'N_a':'N_a','N_s':'N_s','N_p':'N_p','R_s':'R_s','V_f':'V_f','V_FB':'V_FB',
@@ -64,6 +67,8 @@ ALIASES = {
     'Bmax':'B_max','Bpk':'B_pk','Bsat':'B_sat','Np,auto':'N_p,auto',
     'Ns,auto':'N_s,auto','NL':'N_L','Np':'N_p','Ns':'N_s','Ae':'A_e',
     'Ve':'V_e','Wa':'W_a','Awire':'A_wire','Asurf':'A_surf','lg':'l_g',
+    'le':'l_e','μr':'μ_r','μe':'μ_e','AL':'A_L','L0':'L_0',
+    'Rcore':'R_core','Rgap':'R_gap',
     'Rth':'R_i-a',
     'fRHP':'f_RHP','feff':'f_eff','fc,max':'f_c,max','fc':'f_c',
     'fr':'f_r','fz':'f_z','fp':'f_p','ωz₁':'ω_z1','ωz₂':'ω_z2',

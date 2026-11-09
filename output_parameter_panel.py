@@ -24,7 +24,7 @@ OUTPUT_GROUPS = {
     'device': ('Vf_diode', 'Rd_diode', 'Qrr'),
     'capacitors': ('C_out', 'Rc', 'ESL', 'cout2_enable', 'C_out2', 'Rc2', 'ESL2',
                    'd_out_enable', 'Vf_dout', 'Rd_dout'),
-    'mag': ('Ns', 'd_wire_s', 'n_strand_s', 'core_choice_L'),
+    'mag': ('Ns', 'd_wire_s', 'n_strand_s','parallel_wires_s','core_choice_L'),
 }
 BOOL_LABELS = {'cout2_enable': '启用并联输出电容 B', 'd_out_enable': '启用输出防反二极管'}
 OPTION_OWNER = {'C_out2': 'cout2_enable', 'Rc2': 'cout2_enable', 'ESL2': 'cout2_enable',
@@ -443,7 +443,7 @@ class OutputParameterPanel:
         return self.feedback_mode.get() if self._topo_key() == 'FLYBACK' else 'SSR'
 
     def _coupling_supported(self):
-        return self._topo_key() in ('FLYBACK','ACF-FORWARD') and self._effective_feedback_mode() == 'SSR'
+        return self._topo_key() in ('FLYBACK','QR-FLYBACK','ACF-FORWARD') and self._effective_feedback_mode() == 'SSR'
 
     def _coupling_winding_count(self):
         if self._inline_multiple_active():
@@ -472,6 +472,11 @@ class OutputParameterPanel:
         defaults = default_coupling_config(count)
         data['k'] = data.get('k') or defaults['k']
         data['dcr'] = data.get('dcr') or defaults['dcr']
+        if data.get('self_inductances_H') is not None:
+            validated = validate_coupling_config(data, count)
+            data['k'] = validated['K'].tolist()
+            data['self_inductances_H'] = validated['self_inductances_H'].tolist()
+            data['port_order'] = validated['labels']
         previous = self._inline_binding_busy
         self._inline_binding_busy = True
         try:
@@ -492,6 +497,14 @@ class OutputParameterPanel:
         active = self._coupling_supported() and self.coupling_enabled.get()
         candidate = default_coupling_config(count)
         candidate['enabled'] = bool(self.coupling_enabled.get())
+        stored = self.coupling_config
+        if len(stored.get('k', [])) == size:
+            for key in ('self_inductances_H', 'port_order', 'field_matrix_enabled', 'source'):
+                if key in stored:
+                    candidate[key] = copy.deepcopy(stored[key])
+            if 'field_matrix_enabled' in stored:
+                candidate['field_matrix_enabled'] = bool(stored['field_matrix_enabled'] and
+                    (active or self._topo_key() == 'QR-FLYBACK'))
         try:
             for (i, j), variable in self._coupling_vars.items():
                 if j >= size:
@@ -500,6 +513,11 @@ class OutputParameterPanel:
                     value = float(variable.get())
                 except (ValueError, tk.TclError):
                     raise ValueError(f'k(P,OUT{j}) 必须填写有限数值' if i == 0 else f'k(OUT{i},OUT{j}) 必须填写有限数值') from None
+                if (len(stored.get('k', [])) == size and
+                        variable.get().strip() == self._inline_number(stored['k'][i][j])):
+                    # Display rounding is presentation only. A field-derived
+                    # near-unity k must not lose digits on save/reopen.
+                    value = stored['k'][i][j]
                 candidate['k'][i][j] = candidate['k'][j][i] = value
             # DCR is resolved from the current turns, MLT, copper resistivity,
             # diameter and parallel strands by the backend. Never parse its
@@ -531,17 +549,17 @@ class OutputParameterPanel:
         heading.grid(row=row, column=0, columnspan=4, sticky='ew')
         self._inline_extra(frame, [heading], '绕组 耦合 漏感 kij mutual coupling', supported)
         row += 1
-        check = ttk.Checkbutton(frame, text='启用两两 kij 物理周期计算（反激／正激）', variable=self.coupling_enabled)
+        check = ttk.Checkbutton(frame, text='启用两两 kij 物理周期计算（含 QR 反激）', variable=self.coupling_enabled)
         check.grid(row=row, column=0, columnspan=4, sticky='w', pady=3)
         self._coupling_enable_widget = check
         self._inline_extra(frame, [check], '绕组 耦合 漏感 kij coupling_config enabled', supported)
         row += 1
-        note = ttk.Label(frame, text='SSR 反激与有源钳位正激：用于计算器物理周期求解及 LTspice 变压器。正激同时求解钳位和逐路输出电感。QR / PSR 暂不支持。kij 不是旧版 RCD K。',
+        note = ttk.Label(frame, text='SSR 反激 / QR 反激 / 有源钳位正激：独立求解各路绕组电流及交叉调整率。QR 使用退磁与谷底变频周期；正激另求钳位和各路电感。PSR 暂不支持。kij 不是旧版 RCD K。',
                          style='Muted.TLabel', wraplength=350, justify='left')
         note.grid(row=row, column=0, columnspan=4, sticky='ew', pady=4)
         self._inline_extra(frame, [note], '绕组 耦合 漏感 kij 模型限制 SSR', supported)
         row += 1
-        unavailable = ttk.Label(frame, text='已保留绕组耦合草稿；当前 QR / PSR 模型不支持该求解，耦合输入已隐藏。切回 SSR 反激或有源钳位正激后恢复。',
+        unavailable = ttk.Label(frame, text='已保留绕组耦合草稿；当前 PSR 模型不支持该求解，耦合输入已隐藏。切回 SSR 反激、QR 或有源钳位正激后恢复。',
                                 style='Muted.TLabel', wraplength=350, justify='left')
         unavailable.grid(row=row, column=0, columnspan=4, sticky='ew', pady=4)
         self._inline_extra(frame, [unavailable], '绕组 耦合 漏感 kij 模型限制 SSR',
@@ -598,7 +616,7 @@ class OutputParameterPanel:
                 unit_label = ttk.Label(frame, text=unit, style='Muted.TLabel')
                 unit_label.grid(row=row, column=2, sticky='w', padx=4)
                 widgets.append(unit_label)
-            if key in ('d_wire_s', 'n_strand_s'):
+            if key in ('d_wire_s', 'n_strand_s','parallel_wires_s'):
                 readout = self._transformer_density_label(frame, f'OUT{index + 1}')
                 readout.grid(row=row, column=3, sticky='w', padx=(3, 0), pady=3)
                 widgets.append(readout)
@@ -744,7 +762,7 @@ class OutputParameterPanel:
         if variable is None:
             variable = self._transformer_density_vars[winding] = tk.StringVar(value='J 待计算')
         label = ttk.Label(frame, textvariable=variable, style='Muted.TLabel', justify='left')
-        Tooltip(label, '实际 RMS 电流密度：J = Irms / (并绕股数 × 单股铜截面积)。\n不使用平均电流；绝缘层不计入导电铜面积。参数改变后等待当前工况重新计算。')
+        Tooltip(label, '实际 RMS 电流密度：J = Irms / (线圈并绕数 × 单根线股数 × 单股铜截面积)。\n不使用平均电流；绝缘层不计入导电铜面积。参数改变后等待当前工况重新计算。')
         return label
 
     def _build_transformer_dcr_row(self, frame, row, index, predicate):
@@ -760,7 +778,7 @@ class OutputParameterPanel:
         unit = ttk.Label(frame, text='mΩ', style='Muted.TLabel')
         unit.grid(row=row, column=2, sticky='w', padx=4)
         widgets = [caption, value, unit]
-        Tooltip(value, '自动直流铜阻：Rdc = ρ × MLT × 匝数 / (并绕股数 × πd²/4)。\nMLT、线径为自动时使用当前磁芯/绕组预设计值；不再读取旧版手工 DCR。')
+        Tooltip(value, '自动直流铜阻：Rdc = ρ × MLT × 匝数 / (线圈并绕数 × 单根线股数 × πd²/4)。\nMLT、线径为自动时使用当前磁芯/绕组预设计值；不再读取旧版手工 DCR。')
         self._coupling_widgets['dcr', index] = widgets
         self._inline_extra(frame, widgets, f'{name} 绕组 自动 电阻 DCR MLT 线径 并绕', predicate)
         return row + 1

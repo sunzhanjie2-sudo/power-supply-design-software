@@ -26,7 +26,10 @@ class ControllerLogicPanel(ttk.Frame):
         self.view=ScrollableResults(self,background='#f4f8ff');self.view.grid(row=4,column=0,sticky='nsew')
         self.canvas=tk.Canvas(self.view.content,background='#f4f8ff',highlightthickness=0,width=660,height=1030)
         self.canvas.pack(fill='x',expand=True)
-        ttk.Label(self,text='点选框图模块查看说明；蓝色表示当前参数所在模块。\n框图随当前拓扑切换；外部补偿、寄生与试验单独分区。',wraplength=600,justify='left',foreground='#52647a').grid(row=5,column=0,sticky='ew',pady=(8,0))
+        self.xscroll=ttk.Scrollbar(self,orient='horizontal',command=self.canvas.xview)
+        self.canvas.configure(xscrollcommand=self.xscroll.set)
+        self.xscroll.grid(row=5,column=0,sticky='ew')
+        ttk.Label(self,text='点选框图模块查看说明；蓝色表示当前参数所在模块。\n框图随当前拓扑切换；外部补偿、寄生与试验单独分区。',wraplength=600,justify='left',foreground='#52647a').grid(row=6,column=0,sticky='ew',pady=(8,0))
         self.canvas.bind('<Configure>',self._schedule)
         self.view.canvas.bind('<Configure>',self._schedule,add='+')
         self.bind('<Configure>',self._wrap)
@@ -35,7 +38,7 @@ class ControllerLogicPanel(ttk.Frame):
 
     def _wrap(self,event):
         if event.widget is self:
-            for label in (self.heading,self.description,self.condition,*self.grid_slaves(row=5,column=0)):
+            for label in (self.heading,self.description,self.condition,*self.grid_slaves(row=6,column=0)):
                 label.configure(wraplength=max(180,event.width-20))
 
     def select(self,key):
@@ -59,8 +62,13 @@ class ControllerLogicPanel(ttk.Frame):
         self.heading.configure(text=SETTINGS[key][3]+'  ·  '+display_value(key,values,self.design))
         self.description.configure(text=purpose+'\n'+meaning)
         self.condition.configure(text=state_note(key,values))
-        c=self.canvas;width=max(320,self.view.canvas.winfo_width());scale=width/720
-        c.configure(width=width,height=round(1100*scale));c.delete('all')
+        # Keep a readable logical width: shrinking boxes while clamping text
+        # at 11 px makes descriptions collide with live values on small screens.
+        # Use a local horizontal scrollbar; the parent handles vertical scroll.
+        c=self.canvas;width=max(620,self.view.canvas.winfo_width());scale=width/720
+        c.configure(width=width,height=round(1100*scale),scrollregion=(0,0,width,round(1100*scale)));c.delete('all')
+        if self.view.canvas.winfo_width()<620:self.xscroll.grid()
+        else:self.xscroll.grid_remove();c.xview_moveto(0)
         def rect(x,y,w,h,**kw):return c.create_rectangle(x*scale,y*scale,(x+w)*scale,(y+h)*scale,**kw)
         def text(x,y,body,*,size=15,bold=False,w=0,color='#23364d',anchor='nw'):
             return c.create_text(x*scale,y*scale,text=body,anchor=anchor,fill=color,

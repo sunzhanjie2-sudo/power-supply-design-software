@@ -1,4 +1,4 @@
-"""Actual Tk report chooser, one-entry Help menu and XLSX export callback."""
+"""Actual Tk report chooser, Help menu and XLSX export callback."""
 from pathlib import Path
 import sys
 import tkinter as tk
@@ -11,8 +11,8 @@ def run():
     try:
         menu=root.nametowidget(root.cget('menu'))
         helpmenu=root.nametowidget(menu.entrycget('Help (帮助)','menu'))
-        assert helpmenu.index('end')==0
-        assert helpmenu.entrycget(0,'label')=='计算方法与公式说明'
+        assert [helpmenu.entrycget(i,'label') for i in range(helpmenu.index('end')+1)] == [
+            '计算方法与公式说明','多路反激电源设计入门教程','自动计算参数依据']
         app.set_param('V_in_min',27.);app.set_param('V_in_max',33.)
         app.update_all()
         snapshot=main._calculate_input_report(dict(p=app._last['p']),lambda:False)

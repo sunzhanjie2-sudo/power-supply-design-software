@@ -31,6 +31,27 @@ TEXT_FIELDS = ('manufacturer', 'model', 'package', 'conditions', 'note')
 RATING_FIELDS = ('voltage_V', 'ripple_A', 'power_W')
 
 
+def primary_mos_role(p):
+    """Identity projection only: polarity does not change the amplitude model."""
+    item = ((p.get('component_management') or {}).get('items') or {}).get('Q1') or {}
+    condition = str(item.get('conditions', '')).casefold()
+    if any(token in condition for token in ('p-channel', 'p channel', 'p沟道', 'p 沟道')):
+        return '主 P-MOS（幅值等效）'
+    return '主 N-MOS'
+
+
+def controller_reference(p):
+    """A selected IC reference, never an invented pin-level circuit."""
+    if p.get('feedback_mode') == 'PSR-MP6005':
+        return None
+    item = ((p.get('component_management') or {}).get('items') or {}).get('U_CTRL')
+    if not isinstance(item, dict):
+        return None
+    identity = ' '.join(str(item.get(k) or '').strip() for k in ('manufacturer', 'model')).strip()
+    return dict(ref='U_CTRL', role='控制器参考型号（未展开引脚/驱动/偏置）',
+                values=(identity or '身份待补充')+'；通用控制行为参考，非原厂完整芯片模型', keys=())
+
+
 def normalize_management(value=None):
     if value is None:
         value = {}
@@ -90,8 +111,11 @@ def component_registry(p, res=None):
     def add(ref, kind, role, value=''):
         rows.append(dict(ref=ref, kind=kind, role=role, values=value))
     add('J1', 'connector', '输入端口')
-    add('Q1', 'mos', '主开关 MOS')
+    add('Q1', 'mos', primary_mos_role(p))
     add('R_S1', 'resistor', '主开关采样电阻', f"Rs={p.get('Rs', 0):g} Ω")
+    controller = controller_reference(p)
+    if controller is not None:
+        add(controller['ref'], 'controller', controller['role'], controller['values'])
     topo = p.get('topology')
     isolated = topo in ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD')
     if isolated:
@@ -183,7 +207,8 @@ def stress_map(p, res):
     for ref, key in [('Q1', 'switch'), ('Q2', 'auxiliary')]:
         if key not in s:
             continue
-        put(ref, 'voltage', s[key].get('V_block', s[key]['V_max']), '模型稳态阻断平台，不含未建模寄生振铃。')
+        put(ref, 'voltage', s[key].get('V_block', s[key]['V_max']),
+            s[key].get('blocking_voltage_note', '模型稳态阻断平台，不含未建模寄生振铃。'))
         if ref == 'Q1' and c:
             width = c.get('t_pulse')
             narrow = width is not None and width < min(1e-6, op['Ts']/50)

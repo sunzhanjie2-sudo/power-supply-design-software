@@ -1,6 +1,7 @@
 /** Buck/Boost passive periodic C+ESR model. Reference: nonisolated.py. */
 import { type Spec, bank, blockDrop, inputDrop } from "./spec";
 import { inductor } from "./magnetics";
+import { purchased } from "./inductor_selection";
 import { type Gain } from "./state_space";
 import {
   zeros,
@@ -257,7 +258,9 @@ export function solveNonisolated(p: Spec, nominal: Spec) {
   const q = effective(p),
     ind = inductor(nominal, q),
     dcr =
-      q.spice_config?.niso_inductor_dcr >= 0
+      purchased(q)
+        ? ind.R_dc
+        : q.spice_config?.niso_inductor_dcr >= 0
         ? q.spice_config.niso_inductor_dcr
         : ind.R_dc,
     k = new Kernel(q, dcr),

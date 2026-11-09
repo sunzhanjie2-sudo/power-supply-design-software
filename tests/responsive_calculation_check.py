@@ -85,6 +85,7 @@ class SchedulerChecks(unittest.TestCase):
         self.assertTrue(self.worker.results.empty())
 
     def test_real_coupled_solver_cooperatively_cancels_obsolete_work(self):
+        import coupled_flyback as coupled
         from power_stage import DEFAULT_PARAMS
         from loss_model import compute_design
         p = copy.deepcopy(DEFAULT_PARAMS)
@@ -92,20 +93,37 @@ class SchedulerChecks(unittest.TestCase):
                  outputs=[dict(V_out=v, P_out=w, Ns=0.) for v, w in
                           zip((30., 12., 5., 3.3, 24., 15.), (20., 8., 4., 2., 4., 2.))],
                  coupling_config=dict(enabled=True, k=[], dcr=[]))
-        started = threading.Event()
+        started, release, cancelled = threading.Event(), threading.Event(), threading.Event()
+        coupled._periodic_solution.cache_clear()
+        original_cycle = coupled._Circuit.cycle
+
+        def enter_cycle(circuit, *args, **kwargs):
+            # Synchronize at real numerical work, rather than assuming it is
+            # still running after an arbitrary delay on every machine.
+            started.set()
+            if not release.wait(2):
+                raise AssertionError('Cancellation test did not release solver')
+            return original_cycle(circuit, *args, **kwargs)
 
         def solve(parameters, _cancelled):
-            started.set()
-            return compute_design(parameters)
+            try:
+                return compute_design(parameters)
+            except CalculationCancelled:
+                cancelled.set()
+                raise
 
-        self.worker.submit('design', p, solve)
-        self.assertTrue(started.wait(1))
-        time.sleep(.15)
-        self.assertTrue(self.worker.busy)
-        before = time.monotonic()
-        self.worker.invalidate()
-        wait_until(lambda: not self.worker.busy, timeout=1.5)
+        with patch.object(coupled._Circuit, 'cycle', enter_cycle):
+            try:
+                self.worker.submit('design', p, solve)
+                self.assertTrue(started.wait(2))
+                self.assertTrue(self.worker.busy)
+                before = time.monotonic()
+                self.worker.invalidate()
+            finally:
+                release.set()
+            wait_until(lambda: not self.worker.busy, timeout=1.5)
         self.assertLess(time.monotonic() - before, 1.)
+        self.assertTrue(cancelled.is_set())
         self.assertTrue(self.worker.results.empty())
 
     def test_cache_is_bounded_and_owns_independent_copies(self):
@@ -319,7 +337,7 @@ class GUIIntegrationChecks(unittest.TestCase):
             self.assertTrue(app.request_update())
             self.assertLess(time.monotonic() - before, .2)
             self.assertFalse(app._snapshot_valid)
-            self.assertTrue(started.wait(1))
+            self.pump_until(started.is_set)
             for voltage in (32., 33., 34.):
                 app.set_param('V_in', voltage)
                 app.request_update()
@@ -330,7 +348,9 @@ class GUIIntegrationChecks(unittest.TestCase):
         self.assertEqual(published_threads, [threading.get_ident()])
 
     def test_actual_six_output_coupled_solve_keeps_tk_heartbeat_alive(self):
+        from coupled_flyback import _periodic_solution
         from power_stage import DEFAULT_PARAMS
+        _periodic_solution.cache_clear()
         p = copy.deepcopy(DEFAULT_PARAMS)
         p.update(topology='FLYBACK', feedback_mode='SSR', feedback_output=1,
                  outputs=[dict(V_out=v, P_out=w, Ns=0.) for v, w in
@@ -339,8 +359,13 @@ class GUIIntegrationChecks(unittest.TestCase):
         app = self.app
         app._apply_config(p)
         app.nb.select(app.tab_topology)
-        beats, completed, publish_times = [], threading.Event(), []
+        beats, completed, publish_times, compute_times = [], threading.Event(), [], []
         original_publish = app._publish_design
+        from input_voltage_range import calculate_input_operating_point
+
+        def calculate(*args, **kwargs):
+            compute_times.append(time.monotonic())
+            return calculate_input_operating_point(*args, **kwargs)
 
         def publish(parameters, result, **kwargs):
             publish_times.append(time.monotonic())
@@ -354,19 +379,26 @@ class GUIIntegrationChecks(unittest.TestCase):
         self.root.after(1, heartbeat)
         before = time.monotonic()
         try:
-            with patch.object(app, '_publish_design', side_effect=publish):
+            with patch.object(app, '_publish_design', side_effect=publish), \
+                    patch('input_voltage_range.calculate_input_operating_point', side_effect=calculate):
                 self.assertTrue(app.request_update())
                 self.pump_until(lambda: app._snapshot_valid, timeout=35)
         finally:
             completed.set()
-        elapsed = time.monotonic() - before
-        gaps = [b-a for a, b in zip(beats, beats[1:])]
-        compute_beats = [beat for beat in beats if beat < publish_times[0]]
-        compute_gaps = [b-a for a, b in zip(compute_beats, compute_beats[1:])]
+        finished = time.monotonic()
+        elapsed = finished - before
+        observed = [before, *beats, finished]
+        gaps = [b-a for a, b in zip(observed, observed[1:])]
+        compute_beats = [beat for beat in beats if compute_times[0] <= beat < publish_times[0]]
+        compute_observed = [compute_times[0], *compute_beats, publish_times[0]]
+        compute_gaps = [b-a for a, b in zip(compute_observed, compute_observed[1:])]
         print(f'\n6-rail physical solve: {elapsed:.3f}s; '
               f'Tk heartbeats={len(beats)}; max gap={max(gaps)*1000:.1f}ms; '
               f'pre-publish max gap={max(compute_gaps, default=0)*1000:.1f}ms', flush=True)
-        self.assertGreater(len(beats), 15)
+        # Faster solves need fewer heartbeats. Bound the actual unresponsive
+        # interval, including the start-to-first-beat gap previously omitted.
+        self.assertGreater(len(compute_beats), 0)
+        self.assertLess(max(compute_gaps), .35)
         # This covers both the solve and final main-thread Matplotlib redraw.
         # Allow machine/load variance while rejecting a whole-solve UI freeze.
         self.assertLess(max(gaps), 1.25)
@@ -407,6 +439,28 @@ class GUIIntegrationChecks(unittest.TestCase):
         with patch.object(self.main, 'compute_design', side_effect=AssertionError('unnecessary solve')):
             self.assertTrue(self.app.update_all())
         self.assertTrue(self.app._snapshot_valid)
+
+    def test_component_refresh_reuses_snapshot_and_invalidates_old_verdicts(self):
+        app = self.app
+        with patch.object(app, 'get_params', side_effect=AssertionError('view reread every Tk input')):
+            app._refresh_components()
+            self.assertIn('Q1', app.component_manager.rows)
+            app._snapshot_valid = False
+            app._refresh_components()
+        self.assertEqual(app.component_manager.tree.set('Q1', 'status'), '待重新计算')
+
+    def test_cancel_while_waiting_for_layout_never_starts_numerical_work(self):
+        app = self.app
+        app.set_param('V_in', 42.)
+        app._schedule_parameter_scrollregion()
+        with patch('input_voltage_range.calculate_input_operating_point') as calculate:
+            self.assertTrue(app.request_update())
+            self.assertIsNotNone(app._design_ready_job)
+            app.cancel_calculation()
+            wait_until(lambda: not app._calculation_worker.busy)
+            calculate.assert_not_called()
+        self.assertIsNone(app._design_ready_job)
+        self.assertTrue(app._calculation_worker.results.empty())
 
     def test_font_resize_does_not_schedule_a_physical_solve(self):
         with patch.object(self.app, 'schedule_update') as schedule, \

@@ -5,6 +5,7 @@ import ipaddress
 from pathlib import Path
 import re
 import secrets
+import threading
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -42,8 +43,10 @@ class CurveApply(CurveRequest):
 
 
 class ExportRequest(StrictModel):
-    format: Literal['xlsx','docx','json','zip','comparison']
+    format: Literal['xlsx','docx','json','zip','comparison','geometry']
     mos_real_time: bool = False
+    original_text: str | None = Field(default=None,max_length=16*1024*1024)
+    original_name: str | None = Field(default=None,max_length=255)
 
 
 class ActionRequest(StrictModel):
@@ -54,9 +57,13 @@ class ActionRequest(StrictModel):
 class WorkspaceRequest(StrictModel):
     project: dict[str, Any]
 
+class GeometryProfileRequest(StrictModel):
+    layers: list[dict[str,Any]] = Field(default_factory=list,max_length=12000)
+    profile: dict[str,Any] | None = None
 
 def create_app(*, testing=False, pcs_root=None):
     token=secrets.token_urlsafe(32)
+    sizing_lock = asyncio.Lock()
     @asynccontextmanager
     async def lifespan(app):
         manager=JobManager(presentation='pcs' if pcs_root else 'default')
@@ -132,6 +139,31 @@ def create_app(*, testing=False, pcs_root=None):
         from ldo import DEFAULTS,FIELDS
         return dict(spec=DEFAULTS,fields=FIELDS)
 
+    @app.post('/api/initial-design/options')
+    async def sizing_options(body:DesignRequest):
+        from design_engine.initial_design import form_options
+        return form_options(normalize_config(body.spec)) if body.spec else form_options()
+
+    @app.post('/api/initial-design')
+    async def size_design(body:DesignRequest, request:Request):
+        from design_engine.initial_design import generate, describe
+        if sizing_lock.locked():
+            raise HTTPException(409, '已有初版在计算，请稍后重试')
+        async with sizing_lock:
+            stop = threading.Event()
+            work = asyncio.create_task(asyncio.to_thread(generate,body.spec,cancelled=stop.is_set))
+            try:
+                while not work.done():
+                    await asyncio.wait({work},timeout=.2)
+                    if not work.done() and await request.is_disconnected():
+                        stop.set()
+                        await asyncio.gather(work,return_exceptions=True)
+                        raise HTTPException(499, '初版计算已取消')
+                config = work.result()
+                return dict(config=config,summary=describe(config))
+            finally:
+                stop.set()
+
     @app.post('/api/ldo/calculate')
     async def ldo_calculate(body:DesignRequest):
         from ldo import calculate
@@ -161,6 +193,12 @@ def create_app(*, testing=False, pcs_root=None):
     async def example(name: str):
         return await asyncio.to_thread(read_example,name)
 
+    @app.get('/api/examples/{name}/source')
+    async def example_source(name: str):
+        from app_resources import resource_path
+        await asyncio.to_thread(read_example,name)  # Same example allowlist as the JSON API.
+        return FileResponse(resource_path('examples/'+name),media_type='application/json')
+
     @app.get('/api/manual')
     async def manual():
         # A single shipped white-listed document, never a client-supplied path.
@@ -179,6 +217,15 @@ def create_app(*, testing=False, pcs_root=None):
             raise HTTPException(404, '多路反激电源设计入门教程未找到，请保留完整程序目录')
         return FileResponse(path, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename=path.name)
 
+    @app.get('/api/auto-design-basis')
+    async def auto_design_basis():
+        from app_resources import resource_path
+        from design_engine.sizing_basis import DOCUMENT
+        path = resource_path(DOCUMENT)
+        if not path.is_file():
+            raise HTTPException(404, DOCUMENT+' 未找到，请保留完整程序目录')
+        return FileResponse(path, media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename=path.name)
+
     @app.post('/api/preview')
     async def preview_input(body: DesignRequest):
         from design_engine.contracts import json_value
@@ -188,6 +235,16 @@ def create_app(*, testing=False, pcs_root=None):
     async def normalize(body: DesignRequest):
         from design_engine.contracts import json_value
         return json_value(await asyncio.to_thread(normalize_config,body.spec))
+
+    @app.post('/api/geometry/profile')
+    async def geometry_profile(body: GeometryProfileRequest):
+        from transformer_geometry_contract import profile_template,validate_profile
+        try:
+            profile=body.profile if body.profile is not None else profile_template(body.layers)
+            await asyncio.to_thread(validate_profile,profile)
+            return profile
+        except (KeyError,TypeError,ValueError) as exc:
+            raise HTTPException(422,detail=str(exc)) from exc
 
     @app.post('/api/curves/inspect')
     async def inspect(body: CurveRequest):
@@ -232,7 +289,10 @@ def create_app(*, testing=False, pcs_root=None):
 
     @app.post('/api/jobs/{identity}/export',status_code=202)
     async def export(identity: str,body: ExportRequest,request: Request):
-        operation,_=request.app.state.jobs.operate(identity,'export',format=body.format,mos_real_time=body.mos_real_time)
+        options=dict(format=body.format,mos_real_time=body.mos_real_time)
+        if body.format=='geometry':
+            options.update(original_text=body.original_text,original_name=body.original_name)
+        operation,_=request.app.state.jobs.operate(identity,'export',**options)
         return dict(id=operation,state='queued')
 
     @app.post('/api/jobs/{identity}/action', status_code=202)

@@ -66,10 +66,10 @@ def magnetics_design(op, p):
     # buck / boost / buck-boost: one inductor
     if op.get('niso_model'):
         hardware=op['niso_model']['inductor']
-        if hardware.get('ok'):
+        if hardware.get('ok') and hardware.get('design_enabled') is not False:
             p=dict(p,_fixed_inductor={k:hardware[k] for k in ('core','core_geometry','MLT','MLT_source','N','d_wire')})
     ind = mag.design_inductor(op, p)
-    if op.get('niso_model') and ind.get('ok'):
+    if op.get('niso_model') and ind.get('ok') and ind.get('design_enabled') is not False:
         old_total=ind['P_total'];old_rise=ind['dT']
         ind=dict(ind,R_dc=op['niso_model']['dcr'])
         ind['P_cu']=ind['Fr']*ind['R_dc']*op['I_L_rms']**2
@@ -97,7 +97,7 @@ def total_losses(op, p, wf=None):
     p['outputs'] = []
     from diode_curves import conduction,refs,active_diodes
     bank=p.get('diode_curves',{})
-    dev = _device_params(p,int(source_p.get('feedback_output',1)) if op.get('outputs') else None)
+    dev = _device_params(p,int(source_p.get('feedback_output',1)) if source_p.get('outputs') else None)
     semi = semiconductor_losses(op, dev, wf=wf)
     magd = multi_magnetics(op,source_p) if op.get('outputs') else magnetics_design(op,p)
 
@@ -111,10 +111,14 @@ def total_losses(op, p, wf=None):
         for rail,child,child_wf in zip(op['outputs'],op['output_ops'],wf['outputs']):
             rp = dict(p,**{k:rail[k] for k in RAIL_KEYS})
             rp['output_capacitors']=rail.get('output_capacitors')
-            sc = semiconductor_losses(child,_device_params(rp,rail['id']),wf=child_wf)
+            # The physical one-rail matrix solver exposes an outputs list even
+            # when the saved design uses the single-output D1 / D_OUT names.
+            # Device identity follows the input design, not this runtime list.
+            curve_rail = rail['id'] if source_p.get('outputs') else None
+            sc = semiconductor_losses(child,_device_params(rp,curve_rail),wf=child_wf)
             ca = analyze_capacitors(rp,child,child_wf)
             cap_loss = sum(c['ESR']*c['total']**2 for c in ca['output']['caps'])
-            block_model=conduction([child['I_out']],bank.get(refs(rp,rail['id'])[2]),rp['Vf_dout']) if rp['d_out_enable'] else None
+            block_model=conduction([child['I_out']],bank.get(refs(rp,curve_rail)[2]),rp['Vf_dout']) if rp['d_out_enable'] else None
             blocking=block_model['P_cond'] if block_model else 0.
             outputs.append(dict(id=rail['id'],name=rail['name'],spec=rail,op=child,
                 capacitors=ca,diode=sc['diode'],freewheel=sc.get('freewheel'),
@@ -198,7 +202,12 @@ def total_losses(op, p, wf=None):
     for item in active_diodes(source_p):
         if item['kind']=='input':model=input_model
         elif outputs:
-            row=outputs[item['rail']-1];model=row.get({'rectifier':'diode','freewheel':'freewheel','output':'blocking'}[item['kind']])
+            rail = item['rail']
+            if rail is None:
+                if len(outputs) != 1:
+                    raise ValueError('多路二极管损耗缺少明确的输出位号')
+                rail = 1
+            row=outputs[rail-1];model=row.get({'rectifier':'diode','freewheel':'freewheel','output':'blocking'}[item['kind']])
         else:model=output_model if item['kind']=='output' else semi.get('diode' if item['kind']=='rectifier' else 'freewheel')
         if model:diode_models.append(dict(item,**model))
     return dict(semi=semi, mag=magd, P_cap=P_cap, P_cap_in=P_cap_in,diode_models=diode_models,

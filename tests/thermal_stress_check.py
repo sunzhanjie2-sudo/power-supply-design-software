@@ -100,7 +100,12 @@ class ThermalStressChecks(unittest.TestCase):
     def test_coupled_solver_clamp_and_all_winding_temperature(self):
         p=spec('3_OUTPUT_COUPLED_FLYBACK.json',Rth_transformer=18.)
         r=compute_design(p);op=r['op'];t=r['mag']['transformer']
-        self.assertAlmostEqual(op['clamp']['V_ceiling'],op['V_in']+p['Kc']*op['V_r'])
+        # The input connector and the clamp supply differ by the enabled
+        # anti-reverse diode. Check the physical post-blocking bus explicitly;
+        # using connector Vin here was an existing 0.7 V convention error.
+        bus=op['V_in']-(p['Vf_din'] if p['d_in_enable'] else 0.)
+        self.assertAlmostEqual(op['V_in_bus'],bus)
+        self.assertAlmostEqual(op['clamp']['V_ceiling'],bus+p['Kc']*op['V_r'])
         self.assertGreaterEqual(op['V_sw_max'],op['clamp']['V_peak'])
         self.assertAlmostEqual(t['dT'],18.*t['P_total'])
 

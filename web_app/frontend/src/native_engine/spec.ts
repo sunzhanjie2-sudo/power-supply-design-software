@@ -109,6 +109,8 @@ export function normalize(raw: Spec) {
   return p;
 }
 export function validate(p: Spec) {
+  if (p.inductor_design_enabled !== undefined && typeof p.inductor_design_enabled !== "boolean")
+    throw Error("inductor_design_enabled 必须为布尔值");
   for (const key of [
     "V_in",
     "V_out",

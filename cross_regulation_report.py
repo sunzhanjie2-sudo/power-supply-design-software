@@ -36,6 +36,8 @@ def add_report(doc,p,res):
     paragraph(doc,f"有效角点 {data['successful_cases']} / {data['total_cases']}。"+
               ('全部声明的离散角点已求解；不保证连续负载区间内无更坏值。' if data['complete'] else
                '存在未计算或不收敛角点，下表仅为成功角点观察范围，不能作为完整设计电压上下限。'),True)
+    if data.get('model')=='qr-coupled-valley-steady-state':
+        paragraph(doc,'QR角点已求解只表示电荷、周期和能量约束收敛，不代表全部工程指标合格；实际频率超过设计上限的角点单独标记，不强制修改周期来掩盖超限。')
     equation(doc,'R_j = ','V_ref,j²','P_load,j')
     equation(doc,'ΔV_env,% = 100·','V_max,j − V_min,j','V_ref,j')
     paragraph(doc,'包络跨度同时包含本路负载变化与其他路负载影响；“纯交叉跨度”则固定输入电压和被观察路自身负载，仅改变其他路负载，再取其中最大的跨度，均以该路匝比参考电压归一化。电压为直流平均值，不含开关纹波及动态过冲。')
@@ -57,9 +59,22 @@ def add_report(doc,p,res):
     paragraph(doc,'下表负载向量与电压向量均按 OUT1 至 OUT'+str(len(data['rails']))+' 的顺序排列。')
     if extremes:table(doc,['极值','角点','输入电压','负载向量 / W'],extremes,[1.,.7,.9,4.5])
     doc.add_heading('1.3.1 负载组合扫描明细',2)
-    table(doc,['角点 / Vin','负载向量 / W','直流电压向量 / V','状态'],[
+    table(doc,['角点 / Vin','负载向量 / W','直流电压向量 / V','实际频率 / Hz','状态'],[
         (c['id']+' / '+value(c['V_in'],'V'),' / '.join(f'{v:g}' for v in c['powers']),
          ' / '.join(f'{v:.5g}' for v in c['voltages']) if c['voltages'] is not None else '未求解',
-         '已求解' if c['status']=='ok' else c['error']) for c in data['cases']],
-        [.85,2.,2.,2.25])
-    paragraph(doc,'参考：TI 多输出反激漏感与交叉调整率技术说明 '+SOURCE,True)
+         f'{c["f_sw"]:.6g}' if c.get('f_sw') else '—',
+         ('已求解；频率超过设计上限' if (c.get('qr_timing') or {}).get('design_frequency_limit_exceeded') else '已求解') if c['status']=='ok' else c['error']) for c in data['cases']],
+        [.85,1.55,1.55,.9,2.25])
+    qr_cases=[c for c in data['cases'] if (c.get('qr_timing') or {}).get('rcd_hardware')]
+    if qr_cases:
+        hardware=qr_cases[0]['qr_timing']['rcd_hardware']
+        rcd_note=paragraph(doc,'QR固定RCD：R='+value(hardware['R_ohm'],'Ω')+'；C='+value(hardware['C_F'],'F')+
+                  '。参考点由Kc选定一次；每角点联立钳位电荷与电阻功耗求平均钳位电压，不重新选阻容。Q/C是不计周期内泄放的纹波上界估计，仍需核对实际RC瞬态。')
+        rcd_note.paragraph_format.page_break_before=True
+        rcd_note.paragraph_format.keep_with_next=True
+        table(doc,['角点 / Vin','负载向量 / W','平均钳位 / V','Q/C相对纹波上界 / %'],[
+            (c['id']+' / '+value(c['V_in'],'V'),' / '.join(f'{v:g}' for v in c['powers']),
+             value(c['qr_timing'].get('clamp_voltage'),'V'),
+             value(c['qr_timing']['rcd_ripple_upper_relative']*100) if c['qr_timing'].get('rcd_ripple_upper_relative') is not None else '未提供') for c in qr_cases],
+            [1.2,2.9,1.3,1.7])
+    paragraph(doc,'参考资料：'+data.get('source',SOURCE),True)

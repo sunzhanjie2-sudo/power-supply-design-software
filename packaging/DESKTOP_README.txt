@@ -35,5 +35,20 @@ File > LTspice: configure frequency, soft start, Vcs and protection; export
 native ASC or run the simulation/design comparison (Word + project ZIP).
 Comparison requires LTspice installed separately; select LTspice.exe in
 the settings dialog. MP6005 SSR is a configurable reference, not a full IC.
+Export Reports > Joint Simulation combines transformer fields, leakage
+margin, fixed-hardware design calculation and LTspice in one Word report.
+Tool/model settings and independent debug exports share one centre.
+Transformer fields require the separately configured local extractor and
+Elmer. The default leakage factor 1.20 is an editable project assumption.
+Automatic adoption affects the export copy; adopting into the current
+canvas remains an explicit action. See docs/JOINT_SIMULATION.md.
 The supplied examples are calculation examples, not qualified hardware.
 Existing calculation/model limitations and hardware verification apply.
+联合仿真便携配置：
+程序已内置变压器提取内核，不需要安装Python或另带研究工程。
+首次在“导出报告→联合报告→工具与模型”选择完整Elmer安装目录、LTspice及磁芯STEP/BREP。
+磁芯装配、r0/z0与CAD坐标首次核对后可导出模型配置包，带到其他Windows x64电脑导入。
+当前工程提供窗口、匝数、线材、层序、材料/磁导率、接线和气隙，提取JSON自动生成。
+完整复制本程序目录及_internal；只读安装位置请用模型配置包带走用户目录中的CAD。
+详见 _internal/docs/PORTABLE_SIMULATION.md；环境检查不代表场解收敛或方案合格。
+

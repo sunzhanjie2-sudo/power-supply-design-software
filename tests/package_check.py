@@ -20,7 +20,7 @@ def check(folder):
     sys.path.insert(0,str(source))
     from app_resources import resource_path
     resources=folder/'_internal'
-    paths=[Path('计算方法与公式说明.docx'),Path('多路反激电源设计入门教程.docx'),
+    paths=[Path('计算方法与公式说明.docx'),Path('多路反激电源设计入门教程.docx'),Path('自动计算参数依据.docx'),
            Path('MANUAL_ZH.md'),Path('examples/40W_CCM_FLYBACK.json'),
            Path('examples/40W_ACF_FORWARD.json'),Path('examples/6_OUTPUT_FLYBACK_SSR.json'),
            Path('examples/MP6005_PSR_FLYBACK.json'),Path('docs/PARAMETER_PANEL.md'),

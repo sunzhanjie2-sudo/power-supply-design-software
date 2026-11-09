@@ -33,6 +33,8 @@ def normalize_config(spec):
     from power_stage import DEFAULT_PARAMS
     from input_voltage_range import normalize_input_voltage_spec
     p=dict(copy.deepcopy(DEFAULT_PARAMS),**decode_config(spec))
+    from engineering_acceptance import normalize as normalize_acceptance
+    p['engineering_acceptance'] = normalize_acceptance(p.get('engineering_acceptance'))
     from capacitor_banks import normalize
     p=normalize(p)
     p=normalize_input_voltage_spec(p)
@@ -125,6 +127,7 @@ def bootstrap():
     return json_value(dict(version='0.2.0-local', spec=spec, parameters=parameters,
         sections=dict(SECTION_TITLES,psr='MP6005 原边反馈参数'), topologies=TOPOLOGIES, examples=EXAMPLES,
         materials=STEINMETZ_MATERIALS,
+        permeability_materials=__import__('transformer_gap').MATERIAL_PERMEABILITY,
         spice_presets=dict(generic=normalize_settings(),mp6005=mp6005_preset(),mp6005_acf=__import__('acf_spice').preset(),l6565=__import__('qr_spice_settings').l6565_preset(),tps40200=__import__('nonisolated').preset(1),ltc3864=__import__('nonisolated').preset(2),lm5022=__import__('nonisolated').preset(3)),
         spice_niso_logic=__import__('controller_logic').nonisolated_definition(),
         spice_niso_reference_keys=list(__import__('nonisolated').REFERENCE_KEYS),

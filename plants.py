@@ -22,6 +22,14 @@ ct = _LazyControl()
 import numpy as np
 
 
+DCM_PEAK_NOTE='定频反激 DCM 峰值电流逐周期储能线性化，包含各并联电容 ESR，适用于正负载下每周期都开关、完全退磁的工况。'
+
+
+def uses_dcm_peak_energy(p, op):
+    return (p['topology']=='FLYBACK' and op['mode']=='DCM' and p['control_mode']=='Peak Current Mode'
+            and not op.get('outputs') and not op.get('coupled_model') and p.get('feedback_mode','SSR')=='SSR')
+
+
 def build_loop_models(p, op):
     """One plant factory for GUI, API, reports and corners, using solved op."""
     if op.get('niso_model'):
@@ -30,9 +38,26 @@ def build_loop_models(p, op):
     if op.get('acf_model',{}).get('converged'):
         from acf_loop import build_loop
         return build_loop(p,op)
-    if op.get('coupled_model') and not op['coupled_model'].get('ideal_fallback'):
+    if (p['topology']!='QR-FLYBACK' and op.get('coupled_model')
+            and not op['coupled_model'].get('ideal_fallback')):
         from multi_output_loop import build_coupled_loop
         return build_coupled_loop(p, op)
+    if p['topology'] == 'QR-FLYBACK' and p['control_mode']=='Peak Current Mode' and p.get('feedback_mode','SSR')=='SSR':
+        from qr_loop import plant as qr_plant
+        from types import SimpleNamespace
+        gvc,detail=qr_plant(p,op)
+        gc=make_compensator(p).get_transfer_function()
+        note=('QR/BCM 峰值电流控制的周期平均低频近似：按实际电压、峰值电流及变频线性化；'
+              '并联电容分别计入 ESR。Gvc 输入为放大后 CS 等效控制指令；'
+              'A_sense 只表示采样增益，不代替真实 COMP 管脚的前馈/电平转换。'
+              '损耗按工作点常数比例近似，不含谷底跳变、开关延迟及光耦动态。')
+        if detail['multi_output']:
+            note=detail['multi_output']['assumptions']+note
+        if op.get('qr_coupled_model'):
+            note=('直流工作点来自独立QR绕组矩阵/谷底稳态解；以下环路仍为按匝比折算的低频约化，'
+                  '未对多路换流或离散跳谷进行完整线性化。'+note)
+        return (gvc,gc,gvc*gc),SimpleNamespace(model_note=note,qr_linearization=detail,
+            loop_metadata=getattr(gvc,'_loop_metadata',None),mode='BCM')
     source, solved = p, op
     if op.get('aggregate_op'):
         p, op = dict(op['aggregate_params']), op['aggregate_op']
@@ -46,16 +71,19 @@ def build_loop_models(p, op):
     if psr and solved.get('regulation_region') != 'PWM':
         raise ValueError('MP6005 轻载 PFM：不提供 PWM/SSR Bode 裕度；需时域仿真与实测')
     topo = p['topology']
-    if topo == 'QR-FLYBACK' and p['control_mode']=='Peak Current Mode' and not solved.get('outputs') and not psr:
-        from qr_loop import plant as qr_plant
+    if uses_dcm_peak_energy(source,solved):
+        # Each fully demagnetised cycle delivers eta*L*Ipk²/2. Linearising
+        # Pinj/V - V/R gives incremental conductance 2/R at the port.
+        from output_capacitors import build_output_filters
         from types import SimpleNamespace
-        gvc,detail=qr_plant(p,op)
+        filt=build_output_filters([p],[op['R']/2],[op['V_out']])
+        sense=p['Rs']*p['A_sense']*(1+p.get('ma_slope',0.)*p['L']/op['V_in'])
+        if sense <= 0:
+            raise ValueError('定频 DCM 峰值电流环路需要正的有效采样增益')
+        z=ct.ss(filt.A,filt.B,filt.C,filt.D)
+        gvc=z*(2*op['I_out']/(op['I_sw_pk']*sense))
         gc=make_compensator(p).get_transfer_function()
-        note=('QR/BCM 峰值电流控制的周期平均低频近似：按实际电压、峰值电流及变频线性化；'
-              '并联电容分别计入 ESR。Gvc 输入为放大后 CS 等效控制指令；'
-              'A_sense 只表示采样增益，不代替真实 COMP 管脚的前馈/电平转换。'
-              '损耗按工作点常数比例近似，不含谷底跳变、开关延迟及光耦动态。')
-        return (gvc,gc,gvc*gc),SimpleNamespace(model_note=note,qr_linearization=detail,mode='BCM')
+        return (gvc,gc,gvc*gc),SimpleNamespace(mode='DCM',model_note=DCM_PEAK_NOTE)
     cls = {'BUCK': BuckConverter, 'BOOST': BoostConverter,
            'BUCK-BOOST': BuckBoostConverter, 'FLYBACK': FlybackConverter,
            'QR-FLYBACK': FlybackConverter, 'ACF-FORWARD': ActiveClampForwardConverter}[topo]

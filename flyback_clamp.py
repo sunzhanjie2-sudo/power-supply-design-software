@@ -198,6 +198,16 @@ def rcd_components(op, p):
     f = float(op['f_sw'])
     resistance = vc*vc/power if power > 0. else math.inf
     capacitance = power/(f*vc*dv) if power > 0. and vc > 0. and dv > 0. else 0.
+    notes=list(c['notes'])
+    fixed=p.get('_qr_rcd_hardware') if op.get('topology')=='QR-FLYBACK' else None
+    if fixed:
+        resistance,capacitance=float(fixed['R_ohm']),float(fixed['C_F'])
+        if not (math.isfinite(resistance) and resistance>0 and math.isfinite(capacitance) and capacitance>0):
+            raise ValueError('固定QR RCD阻容必须为有限正数')
+        # Project/report consumers must retain the very same R/C used by the
+        # steady-state solver, rather than resize its capacitor at every fsw.
+        dv=power/(f*vc*capacitance) if vc>0 else 0.
+        notes.append('固定参考RCD阻容；钳位为平均功率平衡，Q/C为不计周期内泄放的纹波上界估计，未解析RC瞬态。')
     leak = c.get('L_leak')
     return dict(K=p.get('K', .95), Kc=p.get('Kc', 0.), Lm=op['L'],
                 L_leak=leak, V_reflect=c['V_plateau']-op.get('V_in_bus',op['V_in']),
@@ -205,4 +215,4 @@ def rcd_components(op, p):
                 E_leak=.5*leak*op['I_L_pk']**2 if leak is not None else None,
                 P_user=c['E_clamp'], E_clamp=c['E_clamp'], P_res=power,
                 R_snub=resistance, C_snub=capacitance, model=c['model'],
-                notes=list(c['notes']))
+                notes=notes)

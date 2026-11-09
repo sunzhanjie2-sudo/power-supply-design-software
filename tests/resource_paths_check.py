@@ -11,10 +11,11 @@ from app_resources import resource_path
 class Paths(unittest.TestCase):
     def test_source_resources_exist(self):
         for relative in ('icon.png','icon.ico','MANUAL_ZH.md','计算方法与公式说明.docx',
-                         '多路反激电源设计入门教程.docx',
+                         '多路反激电源设计入门教程.docx','自动计算参数依据.docx',
                          'comp_images/opamp3_clean.png','examples/40W_CCM_FLYBACK.json'):
             self.assertTrue(resource_path(relative).is_file(),relative)
         self.assertEqual(resource_path('计算方法与公式说明.docx').parent,ROOT/'docs/reference')
+        self.assertEqual(resource_path('自动计算参数依据.docx').parent,ROOT/'docs/reference')
         self.assertEqual(resource_path('多路反激电源设计入门教程.docx').parent,ROOT/'docs/tutorials')
 
     def test_frozen_resource_names_stay_compatible(self):

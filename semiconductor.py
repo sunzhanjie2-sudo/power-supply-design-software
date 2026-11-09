@@ -41,7 +41,38 @@ def device_stress(op):
         if op.get('branch_mode'):
             d['V_block'] = op['V_d_max']
     else:
-        sw['V_block'] = op['V_sw_max'] / (1.0 + op['ring_margin'])
+        # The passive Buck/Boost periodic solver supplies the actual sampled
+        # Vds maximum, not the old ideal-voltage * ring_margin recommendation.
+        # Dividing all non-isolated results by that user allowance understated
+        # a 30 V Buck's 30.55 V blocking envelope as only 23.5 V.
+        if topo in (TOPO_BUCK, TOPO_BOOST, TOPO_BUCKBOOST):
+            if op.get('niso_model'):
+                sw['V_block'] = op['V_sw_max']
+                sw['blocking_voltage_source'] = 'periodic_actual_vds_envelope'
+                sw['blocking_voltage_note'] = ('周期功率级实际 Vds 最大值，保守用于稳态阻断检查；'
+                    '包含模型内导通压降/输出低频纹波，不再除以振铃裕量，未覆盖 Coss/ESL 等未建模尖峰。')
+            elif op.get('efficiency_model') == 'equivalent_output_burden':
+                # This explicitly identified legacy model still stores an
+                # engineering allowance in V_sw_max. Derive its nominal
+                # plateau from its own working point instead of guessing a
+                # divisor; preserve the original selection envelope untouched.
+                output = op['V_out_equiv']
+                sw['V_block'] = (op['V_in'] if topo == TOPO_BUCK else output if topo == TOPO_BOOST
+                                 else op['V_in'] + output)
+                sw['V_recommended'] = op['V_sw_max']
+                sw['blocking_voltage_source'] = 'legacy_topology_working_point'
+                sw['blocking_voltage_note'] = ('旧等效工作点的名义阻断平台，由拓扑工作点直接取得；'
+                    '含人工振铃裕量的原 Vds 选型包络另行保留，不把该裕量当作已求解尖峰。')
+            else:
+                # Imported/extended operating points may already contain
+                # physical peaks. With no explicit semantics keep that maximum
+                # conservatively rather than divide away an unknown spike.
+                sw['V_block'] = op['V_sw_max']
+                sw['blocking_voltage_source'] = 'conservative_available_vds_maximum'
+                sw['blocking_voltage_note'] = ('工作点未区分阻断平台与峰值，保守采用现有 Vds 最大值；'
+                    '未用振铃裕量反除，仍需核对其物理范围。')
+        else:
+            sw['V_block'] = op['V_sw_max']
         d['V_block'] = op['V_d_max']
 
     if topo == TOPO_BUCK:
@@ -59,6 +90,8 @@ def device_stress(op):
     elif topo == TOPO_QRFLYBACK:
         sw['note'] = 'QR: valley switching, Eon ~ 0'
         d['note'] = 'output rectifier (BCM, no reverse recovery)'
+    if sw.get('blocking_voltage_note'):
+        sw['note'] = sw.get('note', '')+'；'+sw['blocking_voltage_note']
     if topo in (TOPO_FLYBACK,TOPO_QRFLYBACK) and op.get('clamp'):
         c=op['clamp']
         sw['note'] += ('；'+FLYBACK_STRESS_NOTE if c['V_ceiling'] > op['V_in']+op['V_r']

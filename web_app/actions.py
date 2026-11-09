@@ -18,7 +18,7 @@ _FIELDS = {
     'find_target': {'variable', 'minimum', 'maximum', 'points', 'load_frac', 'target_eta'},
     'optimize': {'variables', 'bounds', 'load_frac', 'maxiter', 'popsize', 'seed'},
     'corners': {'v_in_min', 'v_in_max', 'load_fracs', 'include_nominal'},
-    'loop_response': {'load_output'}, 'winding_preview': {'config'},
+    'loop_response': {'load_output'}, 'winding_preview': {'config', 'render_chart'},
 }
 _INPUTS = {
     'opamp3': {'R1', 'Vref', 'R2', 'R3', 'C1', 'C2', 'C3'},
@@ -103,6 +103,8 @@ def validate_options(action, options):
     elif action == 'winding_preview':
         from winding_layout import validate_winding_config
         opts['config'] = validate_winding_config(opts.get('config', {}))
+        if not isinstance(opts.get('render_chart', True), bool):
+            raise ValueError('render_chart 须为布尔值')
     return opts
 
 
@@ -202,7 +204,8 @@ def execute(run, action, options, path, *, cancelled=lambda: False, progress=Non
                     ax.text(.5, .5, '当前手动排层需修正\n'+preview_error, ha='center', va='center', wrap=True)
                 else:
                     draw_winding_cross_section(ax, assessment)
-            _figure(path, draw)
+            if opts.get('render_chart', True) or not assessment.get('editable'):
+                _figure(path, draw)
             data = dict(windings=windings, assessment=assessment, automatic_plan=automatic,
                 preview_error=preview_error,
                 notes=['仅基于当前已计算匝数和线材的几何预览；不修改电气快照。']+plan_note)

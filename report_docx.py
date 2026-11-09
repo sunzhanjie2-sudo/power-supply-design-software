@@ -28,6 +28,11 @@ TOPOLOGY = {'BUCK':'降压 Buck','BOOST':'升压 Boost','BUCK-BOOST':'反相升�
             'ACF-FORWARD':'有源钳位正激 Active-Clamp Forward'}
 COLORS = ['#2068A0','#D18532','#4C8A79','#8677B2']
 PARAMS = {
+    'inductor_design_enabled':('启用电感磁芯与绕组设计',''),
+    'inductor_dcr':('成品电感 DCR','Ω'),
+    'inductor_rated_current':('成品电感额定 RMS 电流','A'),
+    'inductor_saturation_current':('成品电感饱和电流','A'),
+    'inductor_extra_loss':('成品电感当前工况附加损耗估算','W'),
     'V_in':('输入电压','V'),'V_out':('输出电压','V'),'P_out':('输出功率','W'),
     'f_sw':('开关频率 / QR 频率上限','Hz'),'L':('电感 / 反激励磁电感','H'),
     'C_out':('主输出电容','F'),'Rc':('主输出电容 ESR','Ω'),'ESL':('主输出电容 ESL','H'),
@@ -47,11 +52,13 @@ PARAMS = {
     'Bsat':('饱和磁密','T'),'J':('设计电流密度','A/m²'),'Ku':('面积乘积窗口利用系数',''),
     'rho':('导体电阻率','Ω·m'),'h_conv':('电感对流换热系数','W/(m²·K)'),
     'Rth_transformer':('变压器至环境热阻 Ri-a','K/W'),
+    'mu_r':('磁材相对磁导率（0=材料预设）',''),
     'k_core':('Steinmetz k',''),'a_core':('Steinmetz α',''),'b_core':('Steinmetz β',''),
     'MLT':('标准磁芯平均匝长（0=自动）','m'),'Np':('原边匝数（0=自动）',''),
     'Ns':('副边匝数（0=自动）',''),'d_wire_p':('原边单股线径（0=自动）','m'),
-    'd_wire_s':('副边单股线径（0=自动）','m'),'n_strand_p':('原边并绕股数',''),
-    'n_strand_s':('副边并绕股数',''),'target_eta':('模型效率目标比例',''),
+    'd_wire_s':('副边单股线径（0=自动）','m'),'n_strand_p':('原边单根线股数',''),
+    'n_strand_s':('副边单根线股数',''),'parallel_wires_p':('原边线圈并绕数',''),
+    'parallel_wires_s':('副边线圈并绕数',''),'target_eta':('模型效率目标比例',''),
     'Lm_forward':('正激励磁电感','H'),'C_clamp':('有源钳位电容','F'),
     'forward_dead_time':('设定死区','s'),'forward_d_max':('正激占空比上限',''),
     'Rds_aux':('钳位 MOSFET 导通电阻','Ω'),'Qg_aux':('钳位 MOSFET 栅电荷','C'),
@@ -138,6 +145,8 @@ def _mos_gate_report(doc, switch_loss):
 
 
 def _chart(size, draw):
+    from report_architecture import chart_size,prepare_chart
+    size=chart_size(size,draw)
     with rc_context({'font.sans-serif':['Microsoft YaHei','SimHei','DejaVu Sans'],
                      'font.size':9,'axes.titlesize':10,'axes.labelsize':9,
                      'legend.fontsize':8,'axes.unicode_minus':False,
@@ -148,6 +157,7 @@ def _chart(size, draw):
         draw(fig)
         from design_theme import style_figure
         style_figure(fig)
+        prepare_chart(fig,draw)
         stream=BytesIO(); fig.savefig(stream,format='png',dpi=220,facecolor='white')
         return stream.getvalue()
 
@@ -206,8 +216,8 @@ def _output_report(doc,p,res):
              value(r['op']['V_out'],'V')+' / '+value(r['op']['P_out'],'W'),value(r['op'].get('V_out_cap',r['op']['V_out']),'V'),r['op']['branch_mode'])
             for r in res['outputs']],[.6,1.7,2.1,1.6,1.1])
     tr=res['mag'].get('transformer') or {}
-    table(doc,['绕组','匝数 / 匝比','裸铜线径 / 股数','RMS / 电流密度','几何 DCR','铜损'],[
-        (f"OUT{w['id']}",f"{w['Ns']} / {w['n_actual']:.4g}",value(w['d_wire_s']*1e3,'mm')+f" / {w['n_strand_s']}",
+    table(doc,['绕组','匝数 / 匝比','裸铜线径 / 每根股数 × 并绕根数','RMS / 电流密度','几何 DCR','铜损'],[
+        (f"OUT{w['id']}",f"{w['Ns']} / {w['n_actual']:.4g}",value(w['d_wire_s']*1e3,'mm')+f" / {w['n_strand_s']}股 × {w.get('parallel_wires_s',1)}根",
          value(w['I_rms'],'A')+' / '+value(w['J_actual']/1e6,'A/mm²'),value(w['R_dc'],'Ω'),value(w['P_cu'],'W'))
         for w in tr.get('windings',[])],[.65,1.1,1.35,1.65,1.15,1.2])
     for r,wf in zip(res['outputs'],res['wf']['outputs']):
@@ -216,7 +226,7 @@ def _output_report(doc,p,res):
         table(doc,['参数','值','参数','值'],[
             (FIELDS[a][0],value(spec[a]/FIELDS[a][2],FIELDS[a][1]),FIELDS[b][0],
              '不适用（反激共享 L）' if b=='L' and p['topology']!='ACF-FORWARD' else value(spec[b]/FIELDS[b][2],FIELDS[b][1]))
-            for a,b in [('V_out','P_out'),('P_out_min','ripple_target'),('C_out','Rc'),('ESL','C_out2'),('Rc2','ESL2'),('Vf_diode','Qrr'),('Ns','n_strand_s'),('d_wire_s','L')]
+            for a,b in [('V_out','P_out'),('P_out_min','ripple_target'),('C_out','Rc'),('ESL','C_out2'),('Rc2','ESL2'),('Vf_diode','Qrr'),('Ns','n_strand_s'),('d_wire_s','parallel_wires_s')]+([('L','Vf_dout')] if p['topology']=='ACF-FORWARD' else [])
             ],[1.7,1.85,1.7,1.85])
         paragraph(doc,f"并联电容数量：{len(__import__('capacitor_banks').bank(spec))} 颗；输出防反：{value(spec['d_out_enable'])}，固定 Vf={value(spec['Vf_dout'],'V')}；二极管曲线与对应损耗见第 3 节。"+
                   (f"正激输出电感磁芯：{spec['core_choice_L']}。" if p['topology']=='ACF-FORWARD' else ''))
@@ -224,6 +234,9 @@ def _output_report(doc,p,res):
             from multi_output_charts import draw_output_currents
             axes=fig.subplots(1,2)
             draw_output_currents(axes[0],dict(r,wf=wf))
+            # The subsection/caption already identifies OUTn. The current
+            # legend sits above the axes and would cover its duplicate title.
+            axes[0].set_title('')
             axes[1].plot(wf['t']*1e6,wf['vout_ripple']*1000); axes[1].set(title=f'OUT{idx} 低频纹波',xlabel='时间 / μs',ylabel='mV')
             for ax in axes: ax.grid(alpha=.2)
         figure(doc,_chart((7.1,2.2),waves),f'图 1-OUT{idx}  '+('耦合矩阵解算电流与小纹波重建' if coupled else '对应输出的标称波形；非交叉调整率实测'))
@@ -395,7 +408,7 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
     section(doc,'2.1  Q1 开通与关断过程')
     _mos_gate_report(doc, res['semi']['switch'])
     paragraph(doc,'开通对应 t1–t4，关断对应 t5–t8；蓝色左轴为 Vgs，橙色右轴为 Vds。下图保留软件页面相同的分段颜色、边界、时间标注及电压曲线。')
-    paragraph(doc,'导出时的 MOS 时间轴选项：'+('真实时间轴（ns）；时长未知时该图退回阶段展开。' if mos_real_time else '阶段展开（非等时长），各阶段下方标注实际时长。'),True)
+    paragraph(doc,'导出时的 MOS 时间轴选项：'+('真实时间轴（ns）；时长未知时该图退回阶段展开。' if mos_real_time else '阶段展开（非等时长）；各阶段实际时长见分段表。'),True)
     def switching(fig):
         draw_power_switching(fig.subplots(1,2),op,p,res,real_time=mos_real_time)
     figure(doc,_chart((7.1,2.9),switching),'图 2-2  Q1 MOS 开通 Vgs / Vds（左）与关断 Vgs / Vds（右）')
@@ -476,16 +489,32 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
     paragraph(doc,'输入与输出电容 ESR 均计入最终损耗。整周期采样按全部 DFT 频点进行复阻抗分流，并以 Parseval 校核能量；仅非整周期采样采用平顶窗近似。单只 RMS 可因环流大于组总 RMS。',True)
 
     section(doc,'5  磁件设计与热评估')
-    table(doc,['基础输入','当前值','基础输入','当前值'],[
+    bought_inductor = (res['mag'].get('inductor') or {}).get('design_enabled') is False
+    if not bought_inductor:
+        table(doc,['基础输入','当前值','基础输入','当前值'],[
         (PARAMS[a][0],value(p[a],PARAMS[a][1]),PARAMS[b][0],value(p[b],PARAMS[b][1]))
         for a,b in [('Bmax','Bsat'),('J','Ku'),('rho','Rth_transformer' if res['mag'].get('transformer') else 'h_conv'),('k_core','a_core'),('b_core','MLT')]
-    ],[2.15,1.4,2.15,1.4])
+        ],[2.15,1.4,2.15,1.4])
     devices=[]
     for kind,label in [('transformer','变压器'),('inductor','电感')]:
         dev=res['mag'].get(kind)
         if not dev: continue
         if not dev.get('ok'):
             paragraph(doc,label+'未能选芯：'+str(dev.get('reason','未知原因'))); continue
+        if dev.get('design_enabled') is False:
+            doc.add_heading('L1 · 外购成品电感', 2)
+            rating = lambda key:value(dev[key], 'A') if dev[key] > 0 else '未提供'
+            table(doc, ['参数 / 指标','当前值','参数 / 指标','当前值'], [
+                ('电感量 L',value(dev['L'],'H'),'DCR',value(dev['R_dc'],'Ω')),
+                ('实际 RMS 电流',value(dev['I_rms'],'A'),'厂家 RMS 额定值',rating('inductor_rated_current')),
+                ('实际峰值电流',value(dev['I_pk'],'A'),'厂家饱和电流 Isat',rating('inductor_saturation_current')),
+                ('直流铜损 Irms²×DCR',value(dev['P_cu'],'W'),'用户附加损耗估算',value(dev['P_extra'],'W')),
+                ('已计入电感损耗',value(dev['P_total'],'W'),'磁密 / 绕制 / 温升','未评估')], [1.9,1.65,1.9,1.65])
+            equation(doc,'PL=ILrms^2·Rdc+Pextra')
+            paragraph(doc,dev['note'],True)
+            figure(doc,_bars(['直流铜损','用户附加损耗'],[dev['P_cu'],dev['P_extra']],
+                '成品电感已计入损耗',height=2.1),'图 5-1  成品电感损耗；未提供的附加损耗不代表为零')
+            continue
         devices.append((kind,label,dev)); doc.add_heading(label+' · '+dev['core_label'],2)
         paragraph(doc,'磁芯尺寸来源：'+dev['core']+'；MLT 来源：'+dev['MLT_source']+'。',True)
         rows=[('有效截面积 Ae',value(dev['Ae']*1e6,'mm²'),'有效体积 Ve',value(dev['Ve']*1e6,'cm³')),
@@ -495,10 +524,22 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
               ('铜损',value(dev['P_cu'],'W'),'磁芯损耗',value(dev['P_core'],'W'))]
         if kind=='transformer':
             equation(doc,'ΔT=(Pcu+Pcore)·Rth')
+            if dev.get('gap_design'):
+                gap=dev['gap_design']
+                equation(doc,'lg=μ₀·Ae·Np²/Lm−le/μr')
+                rows += [('磁材相对磁导率 μr',value(gap['mu_r']), '有效磁路长度 le',value(gap['le_m']*1e3,'mm')),
+                         ('目标励磁电感 Lm',value(gap['target_inductance_H']*1e6,'μH'),
+                          '目标 AL',value(gap['AL_target_H']*1e9,'nH/匝²')),
+                         ('无气隙励磁电感',value(gap['L_ungapped_H'],'H'),
+                          '估算等效总气隙 lg',value(None if gap['gap_m'] is None else gap['gap_m']*1e3,'mm')),
+                         ('磁导率来源',gap['mu_r_source'], '磁路长度来源',gap['le_source'])]
+                rows += [('含隙等效磁导率 μe',value(gap['mu_effective']),
+                          '磁导率基准',gap['mu_r_conditions'] or '用户指定')]
             rows += [('至环境热阻 Ri-a',value(dev['Rth_transformer'],'K/W'),
                       '温升计算',f"{dev['P_total']:.5g} W × {dev['Rth_transformer']:.5g} K/W = {dev['dT']:.5g} K")]
             rows += [('实际匝数 Np / Ns',f"{dev['Np']} / {dev['Ns']}",'实际匝比',value(dev['n_actual'])),
-                     ('原 / 副边单股线径',value(dev['d_wire_p'],'m')+' / '+value(dev['d_wire_s'],'m'),'并绕股数',f"{dev['n_strand_p']} / {dev['n_strand_s']}"),
+                     ('原 / 副边单股线径',value(dev['d_wire_p'],'m')+' / '+value(dev['d_wire_s'],'m'),'单根线股数',f"{dev['n_strand_p']} / {dev['n_strand_s']}"),
+                     ('原 / 副边线圈并绕根数',f"{dev.get('parallel_wires_p',1)} / {dev.get('parallel_wires_s',1)}",'截面线数（匝数 × 根数）',f"{dev['Np']*dev.get('parallel_wires_p',1)} / {dev['Ns']*dev.get('parallel_wires_s',1)}"),
                      ('原 / 副边直流电阻',value(dev['R_dc_p'],'Ω')+' / '+value(dev['R_dc_s'],'Ω'),'交流修正系数',value(dev['Fr_p'])+' / '+value(dev['Fr_s']))]
             rows += [('原 / 副边 RMS 电流密度',value(dev['J_actual_p']/1e6,'A/mm²')+' / '+value(dev['J_actual_s']/1e6,'A/mm²'),
                       'DCR 来源','ρ × MLT × 匝数 / 总裸铜截面积')]
@@ -508,7 +549,11 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
             rows += [('匝数',str(dev['N']),'估算气隙',value(dev['gap'],'m')),
                      ('单线线径',value(dev['d_wire'],'m'),'直流电阻 / Fr',value(dev['R_dc'],'Ω')+' / '+value(dev['Fr']))]
         table(doc,['计算参数','结果','计算参数','结果'],rows,[1.9,1.65,1.9,1.65])
-    paragraph(doc,'磁芯损耗采用实际理想 B(t) 的 NSE 数值积分。铜损为直流电阻乘简化趋肤修正；未计邻近效应、端接损耗、热态电阻或绝缘填充。变压器温升 ΔT=(全部绕组铜损+磁芯损耗)×用户输入 Ri-a；默认 100 K/W 仅为初始假设，须按实测或热设计填写。独立电感保留经验表面积与对流模型。两者均不是局部热点温度或实测温升。',True)
+        if kind=='transformer' and dev.get('gap_design'):
+            gap=dev['gap_design']
+            paragraph(doc,(gap['mu_r_conditions'] or '')+'。'+gap['note'])
+    if not bought_inductor:
+        paragraph(doc,'磁芯损耗采用实际理想 B(t) 的 NSE 数值积分。铜损为直流电阻乘简化趋肤修正；未计邻近效应、端接损耗、热态电阻或绝缘填充。变压器温升 ΔT=(全部绕组铜损+磁芯损耗)×用户输入 Ri-a；默认 100 K/W 仅为初始假设，须按实测或热设计填写。独立电感保留经验表面积与对流模型。两者均不是局部热点温度或实测温升。',True)
     if devices:
         section(doc,'5.1  磁通波形与损耗分配')
         def flux(fig):
@@ -593,7 +638,9 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
     if loop and loop.get('model',{}).get('experimental'):
         paragraph(doc,'周期映射模型独立保留各路电容与局部导通状态，不使用原单路 DCM/CCM 公式，也不重新乘预设效率。增益裕度仅检查扫描范围，未检出不代表无限裕量。高频寄生、真实采样控制及全部独立负载角点仍需 SPICE 与样机 FRA。',True)
     else:
-        paragraph(doc,'模型边界：DCM/BCM 为低频单极点近似；普通 PWM 模型不含输出 ESR 零点。正激仅 CCM 电压模式含主输出 ESR，PCM 未含。'
+        from plants import uses_dcm_peak_energy, DCM_PEAK_NOTE
+        paragraph(doc,DCM_PEAK_NOTE if uses_dcm_peak_energy(p,op) else
+              '模型边界：DCM/BCM 为低频单极点近似；普通 PWM 模型不含输出 ESR 零点。正激仅 CCM 电压模式含主输出 ESR，PCM 未含。'
               +('多路输出的两组电容均按刚性匝比折算，未建立支路独立动态与交叉调整率模型。' if res.get('outputs') else '单路兼容模型未包含第二并联电容。')
               +'未包含完整钳位谐振动态；PCM 斜坡回退不代表通过次谐波稳定验证。',True)
 
@@ -675,8 +722,10 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
         section(doc,'8.2  固定硬件输入与负载角点')
         paragraph(doc,f"输入范围 {value(corners['v_in'][0],'V')}–{value(corners['v_in'][1],'V')}；共 {len(corners['corners'])} 个角点。固定标称磁芯、匝数、线径、L/C、器件和补偿参数，不在轻载点重新选芯或整定。QR 随运行点更新实际频率。未扫描温度与器件容差。")
         table(doc,['固定磁件','磁芯','匝数','单股线径'],[
-            (k,d['core'],f"{d['Np']} / {d['Ns']}" if k=='transformer' else str(d['N']),
-             value(d.get('d_wire_p',d.get('d_wire')),'m')) for k,d in corners['hardware'].items() if isinstance(d,dict)],
+            (k,'外购成品电感' if d.get('design_enabled') is False else d['core'],
+             value(d['L'],'H') if d.get('design_enabled') is False else f"{d['Np']} / {d['Ns']}" if k=='transformer' else str(d['N']),
+             'DCR '+value(d['inductor_dcr'],'Ω') if d.get('design_enabled') is False else value(d.get('d_wire_p',d.get('d_wire')),'m'))
+             for k,d in corners['hardware'].items() if isinstance(d,dict)],
             [1.4,1.7,1.4,2.6])
         rows=[]
         for c in corners['corners']:
@@ -787,7 +836,7 @@ def export_design_docx(path,p,op,wf,res,models=None,loop_error=None,corners=None
     table(doc,['栅电荷 / 开关时间输入','符号','值'],[(PARAMS[k][0],k,value(p.get(k,0.),PARAMS[k][1])) for k in gate],[3.8,1.4,1.9])
     paragraph(doc,'主开关 t1–t8 的时长、阶段含义与来源见第 2.1 节。栅电荷损耗时间按参考表的自然对数公式计算；图中的 t4/t5 为补充估算，不修改损耗。',True)
     section(doc,'附录 B  其他输入与配置')
-    extra=['Np','Ns','d_wire_p','d_wire_s','n_strand_p','n_strand_s'] if res['mag'].get('transformer') else []
+    extra=['Np','Ns','d_wire_p','d_wire_s','n_strand_p','n_strand_s','parallel_wires_p','parallel_wires_s'] if res['mag'].get('transformer') else []
     extra += ['forward_dead_time','forward_d_max','ESR_clamp'] if op['topology']=='ACF-FORWARD' else []
     extra += ['Rs','A_sense','ma_slope']
     extra += ['Vf_din'] if p.get('d_in_enable') else []

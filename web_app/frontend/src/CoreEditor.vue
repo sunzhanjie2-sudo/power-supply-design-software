@@ -170,6 +170,10 @@ function input(key: string, power: number, value: string) {
     <p v-if="material" class="hint">
       k、α、β 仍在本组直接编辑；材料预设不代表所有温度和磁通工况。
     </p>
+    <p v-if="material && ['FLYBACK','QR-FLYBACK','ACF-FORWARD'].includes(spec.topology) && meta.permeability_materials" class="hint">
+      材料初始磁导率 μi={{ meta.permeability_materials[spec.core_material]?.mu_r ?? '待提供' }}。
+      μr 填 0 时采用该预设，可在“磁导率与气隙估算”中修改。有效磁路长度 le 自动取 Ve/Ae，平均匝长 MLT 用于铜阻计算。
+    </p>
   </div>
 </template>
 <style scoped>

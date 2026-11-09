@@ -12,6 +12,7 @@ from main import PowerSupplyAnalyzer
 
 TUTORIAL = '多路反激电源设计入门教程.docx'
 REFERENCE = '计算方法与公式说明.docx'
+BASIS = '自动计算参数依据.docx'
 
 
 class HelpDocuments(unittest.TestCase):
@@ -30,7 +31,12 @@ class HelpDocuments(unittest.TestCase):
                 if arg.arg == 'label' and isinstance(arg.value, ast.Constant):
                     entries.append((node.lineno, arg.value.value))
         labels = [label for _, label in sorted(entries)]
-        self.assertEqual(labels, [REFERENCE[:-5], TUTORIAL[:-5]])
+        self.assertEqual(labels, [REFERENCE[:-5], TUTORIAL[:-5], BASIS[:-5]])
+
+    def test_design_basis_opens_exact_shipped_document(self):
+        with patch('main.os.startfile') as launch:
+            self.app.open_auto_design_basis()
+            self.assertEqual(Path(launch.call_args.args[0]).resolve(), resource_path(BASIS).resolve())
 
     def test_tutorial_opens_exact_shipped_document(self):
         with patch('main.os.startfile') as launch, patch('main.messagebox.showerror') as error:
@@ -59,7 +65,7 @@ class HelpDocuments(unittest.TestCase):
     def test_both_documents_are_bundled_without_build_scripts(self):
         from runpy import run_path
         DATA = run_path(str(ROOT/'packaging/bundle_common.py'))['DATA']
-        for name in (REFERENCE, TUTORIAL):
+        for name in (REFERENCE, TUTORIAL, BASIS):
             self.assertIn((str(resource_path(name)), '.'), DATA)
         self.assertFalse(any('tutorials' in source and not source.endswith('.docx') for source, _ in DATA))
 

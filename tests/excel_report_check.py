@@ -77,7 +77,8 @@ class ExcelReportCheck(unittest.TestCase):
             parts,names,xml=read_workbook(path)
             self.assertEqual(snapshot['base_spec'],original)
             self.assertEqual(result['successful_cases'],2)
-            self.assertEqual(result['sheet_count'],12)
+            self.assertEqual(result['sheet_count'],13)
+            self.assertEqual(names[0],'00 工程验收')
             self.assertIn('14 关键器件BOM与降额',names)
             self.assertGreater(result['figure_count'],20)
             self.assertFalse(result['incomplete'])
@@ -90,7 +91,8 @@ class ExcelReportCheck(unittest.TestCase):
                 self.assertIn('Vinmin',ET.tostring(cells['A4'],encoding='unicode'))
                 self.assertIn('Vinmax',ET.tostring(cells['J4'],encoding='unicode'))
                 self.assertEqual(root.find('.//{'+S+'}pane').get('ySplit'),'4')
-            cells={c.get('r'):c for c in xml['xl/worksheets/sheet1.xml'].findall('.//{'+S+'}c')}
+            overview=names.index('01 需求与工况总览')+1
+            cells={c.get('r'):c for c in xml[f'xl/worksheets/sheet{overview}.xml'].findall('.//{'+S+'}c')}
             for addr,case in zip(('E6','N6'),snapshot['cases']):
                 self.assertEqual(cells[addr].get('t'),'n')
                 self.assertAlmostEqual(float(cells[addr].find('{'+S+'}v').text),case['result']['eta'],places=12)

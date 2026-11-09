@@ -4,6 +4,7 @@ from component_management import evaluate_components, STATUS, rating_text
 
 def add_component_report(doc, p, res):
     from docx_layout import section, paragraph, table
+    from report_architecture import component_check_label
     data = evaluate_components(p, res)
     section(doc, '1.4  关键器件 BOM 与降额初筛')
     paragraph(doc, f"规则来源：{data['source']}；{data['zone']} 区。{data['note']}")
@@ -16,12 +17,12 @@ def add_component_report(doc, p, res):
     def number(x, unit=''):
         return '待补充' if x is None else f'{x:.4g}{unit}'
     table(doc, ['位号 / 检查项', '实际应力', '额定值', '使用率', '限值 / 因数', '结论'], [
-        (c['name'], number(c['value'], c['unit']), number(c['rating'], c['unit']),
+        (component_check_label(c), number(c['value'], c['unit']), number(c['rating'], c['unit']),
          '—' if c['utilization'] is None else f"{c['utilization']:.1%}",
          number(c['limit'], c['unit'])+' / '+('未定义' if c['factor'] is None else f"{c['factor']:.0%}"),
          STATUS[c['state']]) for c in data['checks']], [1.7, 1., 1., .8, 1.5, 1.])
     table(doc, ['位号 / 检查项', '依据与限制'], [
-        (c['name'], c['source']+'；'+c['note']) for c in data['checks']], [1.5, 5.5])
+        (component_check_label(c), c['source']+'；'+c['note']) for c in data['checks']], [1.5, 5.5])
     notes = [(r['ref'], '；'.join(filter(None, [
         '资料缺失：'+ '/'.join(r['identity_missing']) if r['identity_missing'] else '',
         r.get('conditions'), r.get('note')]))) for r in data['rows']]

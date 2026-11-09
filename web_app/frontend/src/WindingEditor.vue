@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import type { Spec } from "./types";
 import { fmt } from "./types";
+import WindingCanvas from './WindingCanvas.vue';
 
 /** Construction editor only. All capacity/diameter/fit results come from Python. */
 const props = withDefaults(defineProps<{
@@ -29,7 +30,7 @@ const configDefaults: Spec = {
   window_width: 0, window_height: 0, margin_x: 0.00025, margin_y: 0.00010,
   diameter_allowance: 0.00003, layer_insulation: 0.00005,
   interwinding_insulation: 0.00015, wire_gap: 0,
-  order: [], overrides: {}, layer_plan: [],
+  order: [], overrides: {}, layer_plan: [],turn_positions:{},
 };
 const wireDefaults: Spec = {
   outer_diameter: 0, strand_columns: 0, wire_type: "auto", parallel_bundles: 1,
@@ -56,9 +57,36 @@ function canonical(value: unknown): string {
     .map(([key, child]) => JSON.stringify(key) + ":" + canonical(child)).join(",") + "}";
   return JSON.stringify(value) ?? "null";
 }
-const config = computed<Spec>(() => ({ ...clone(configDefaults),
-  ...clone(props.spec.winding_config || {}) }));
+function identifyLayers(rows: Spec[]) {
+  const used=new Set(rows.map(row=>row.section_id).filter(Boolean));
+  const counters=new Map<string,number>();
+  for(const row of rows){
+    if(row.section_id) continue;
+    let n=counters.get(row.winding_id)||0, id:string;
+    do {
+      let index=n++, suffix='';
+      while(index>=0){suffix=String.fromCharCode(65+index%26)+suffix;index=Math.floor(index/26)-1;}
+      id=row.winding_id+'_'+suffix;
+    } while(used.has(id));
+    row.section_id=id;used.add(id);counters.set(row.winding_id,n);
+  }
+  return rows;
+}
+const config = computed<Spec>(() => {
+  const c={...clone(configDefaults),...clone(props.spec.winding_config || {})};
+  identifyLayers(c.layer_plan);
+  return c;
+});
 const plan = computed<Spec[]>(() => config.value.layer_plan || []);
+const layerInsulation = computed(() => plan.value.map((entry, index) => {
+  const previous = plan.value[index - 1];
+  if (!previous) return { label: "首层 · 靠骨架", thickness: null };
+  const sameWinding = previous.winding_id === entry.winding_id;
+  return {
+    label: `${sameWinding ? "同绕组层间" : "不同绕组间"} · ${previous.winding_id} → ${entry.winding_id}`,
+    thickness: config.value[sameWinding ? "layer_insulation" : "interwinding_insulation"],
+  };
+}));
 const actualRows = computed<Spec[]>(() => props.windings.filter((row) =>
   typeof row.id === "string" && Number.isInteger(row.turns) && row.turns > 0 &&
   Number.isInteger(row.strands) && row.strands > 0 &&
@@ -70,13 +98,13 @@ const rows = computed<Spec[]>(() => {
   if (!source.length) {
     const rails: Spec[] = props.spec.outputs?.length ? props.spec.outputs : [{
       name: "副边", Ns: props.spec.Ns, n_strand_s: props.spec.n_strand_s,
-      d_wire_s: props.spec.d_wire_s,
+      d_wire_s: props.spec.d_wire_s,parallel_wires_s:props.spec.parallel_wires_s||1,
     }];
     source = [{ id: "P", name: "原边 P", turns: props.spec.Np || null,
-      strands: props.spec.n_strand_p || null, bare_diameter: props.spec.d_wire_p || null },
+      strands: props.spec.n_strand_p || null,parallel_wires:props.spec.parallel_wires_p||1,bare_diameter: props.spec.d_wire_p || null },
       ...rails.map((row, index) => ({ id: `OUT${index + 1}`,
         name: `OUT${index + 1} · ${row.name || "副边"}`, turns: row.Ns || null,
-        strands: row.n_strand_s || null, bare_diameter: row.d_wire_s || null }))];
+        strands: row.n_strand_s || null,parallel_wires:row.parallel_wires_s||1,bare_diameter: row.d_wire_s || null }))];
   }
   const order: string[] = config.value.order || [];
   const known = new Map(source.map((row) => [row.id, row]));
@@ -191,6 +219,7 @@ function updateConfig(nextConfig: Spec) {
   localMessage.value = "设置已更改。请评估/刷新截面；如改动了电气匝数或线径，请先重新计算设计。";
   emit("change", next);
 }
+function moveWire(nextConfig:Spec){updateConfig(nextConfig);emit('preview',nextConfig);}
 function geometry(key: string, event: Event) {
   const text = (event.target as HTMLInputElement).value;
   const next = clone(config.value);
@@ -246,7 +275,7 @@ function useAutomatic() {
     !window.confirm("将用当前自动方案替换手动逐层方案。是否继续？")) return;
   manualMode.value = true;
   selectedLayer.value = 0;
-  updateConfig({ ...clone(config.value), layer_plan: clone(props.automaticPlan!) });
+  updateConfig({ ...clone(config.value), layer_plan: clone(props.automaticPlan!), turn_positions:{} });
 }
 function editLayer(index: number, key: string, value: any) {
   const next = clone(config.value);
@@ -260,7 +289,8 @@ function addLayer() {
   const index = selectedLayer.value;
   const position = index === null ? next.layer_plan.length : index + 1;
   const id = index === null ? selected.value : next.layer_plan[index]?.winding_id || selected.value;
-  next.layer_plan.splice(position, 0, { winding_id: id, turns: 1 });
+  next.layer_plan.splice(position, 0, { winding_id: id, turns: 1, section_id:'SEC_'+crypto.randomUUID().replaceAll('-','') });
+  identifyLayers(next.layer_plan);
   manualMode.value = true; selectedLayer.value = position;
   updateConfig(next);
 }
@@ -290,7 +320,9 @@ function splitLayer() {
   }
   const first = Math.floor(entry.turns / 2);
   const next = clone(config.value);
-  next.layer_plan.splice(index, 1, { ...entry, turns: first }, { ...entry, turns: entry.turns - first });
+  const second={...entry,turns:entry.turns-first,section_id:'SEC_'+crypto.randomUUID().replaceAll('-','')};
+  next.layer_plan.splice(index, 1, { ...entry, turns: first }, second);
+  identifyLayers(next.layer_plan);
   selectedLayer.value = index + 1; updateConfig(next);
 }
 function clearUnknown() {
@@ -327,12 +359,12 @@ function mm(value: any) { return value === null || value === undefined ? "" : Nu
 
     <fieldset class="we-box"><legend>2 · 由骨架向外的绕组顺序</legend>
       <div class="we-table-scroll"><table class="we-table">
-        <thead><tr><th>选择</th><th>绕组</th><th>总匝数</th><th>每匝总股数</th><th>单股裸铜线径</th><th>窗口容量 / 层</th></tr></thead>
+        <thead><tr><th>选择</th><th>绕组</th><th>总匝数</th><th>单根股数 × 并绕根数</th><th>单股裸铜线径</th><th>窗口容量 / 层</th></tr></thead>
         <tbody><tr v-for="row in rows" :key="row.id" :class="{ 'we-selected': selected === row.id }" @click="selected = row.id">
           <td><input type="radio" name="winding-selection" :aria-label="`编辑 ${row.id} 绕组`" :checked="selected === row.id" @change="selected = row.id" /></td>
           <td><strong>{{ row.id }}</strong><small class="we-block">{{ row.name }}</small></td>
           <td>{{ row.turns ? fmt(row.turns, '匝') : '待计算' }}</td>
-          <td>{{ row.strands ? fmt(row.strands, '股') : '待计算' }}</td>
+          <td>{{ row.strands ? `${fmt(row.strands, '股')} × ${row.parallel_wires||1} 根` : '待计算' }}</td>
           <td>{{ row.bare_diameter ? fmt(row.bare_diameter * 1000, 'mm') : '待计算' }}</td>
           <td>{{ assessmentRows.find((item) => item.id === row.id)?.capacity ?? '待评估' }}</td>
         </tr></tbody>
@@ -346,7 +378,7 @@ function mm(value: any) { return value === null || value === undefined ? "" : Nu
       <div class="we-grid">
         <label class="we-field"><span>线材类型</span><select :value="wire.wire_type" :disabled="legacy" @change="setWire('wire_type', ($event.target as HTMLSelectElement).value)"><option value="auto">自动 · 多股利兹 / 单股铜线</option><option value="solid">普通铜线 · 不压扁</option><option value="litz">利兹线 · 等面积压扁</option></select></label>
         <label class="we-field"><span>绕制方式</span><select :value="wire.winding_style" :disabled="legacy" @change="setWire('winding_style', ($event.target as HTMLSelectElement).value)"><option v-for="style in styles" :value="style.value">{{ style.label }}</option></select></label>
-        <label class="we-field"><span>每匝并绕束数</span><input type="number" min="1" max="10000000" step="1" :value="wire.parallel_bundles" :disabled="legacy" @change="setNumericWire('parallel_bundles', $event)" /><small>必须整除每匝电气总股数。</small></label>
+        <label class="we-field"><span>每根线内分束数</span><input type="number" min="1" max="10000000" step="1" :value="wire.parallel_bundles" :disabled="legacy" @change="setNumericWire('parallel_bundles', $event)" /><small>只划分单根线内已有股数；线圈并绕根数在左侧磁件参数中设置。</small></label>
         <label class="we-field"><span>每束股数（自动分配）</span><output>{{ perBundle === null ? '待确认总股数 / 束数' : `${perBundle} 股 / 束` }}</output><small>{{ selectedRow.strands || '待计算' }} 总股 ÷ {{ wire.parallel_bundles }} 束；不重复增加铜截面积。</small></label>
         <label class="we-field"><span>单股含漆外径</span><span class="we-unit-input"><input type="number" min="0" step="any" :value="mm(wire.outer_diameter)" @change="setNumericWire('outer_diameter', $event, 1000)" /><span>mm</span></span><small>0 = 裸铜线径 + 第 1 节含漆外径增量。</small></label>
         <label class="we-field"><span>整束未压扁外径（优先实测）</span><span class="we-unit-input"><input type="number" min="0" step="any" :value="mm(wire.bundle_diameter)" :disabled="legacy" @change="setNumericWire('bundle_diameter', $event, 1000)" /><span>mm</span></span><small>0 = 后端按单股含漆外径、每束股数与填充系数估算。</small></label>
@@ -359,16 +391,18 @@ function mm(value: any) { return value === null || value === undefined ? "" : Nu
 
     <fieldset class="we-box"><legend>4 · 逐层排布与交错绕制</legend>
       <div class="we-toolbar"><label class="we-checkbox"><input type="checkbox" :checked="manualMode" @change="toggleManual" />启用手动逐层排布</label><button type="button" :disabled="!automaticReady || previewBusy" @click="useAutomatic">从已评估自动方案生成</button></div>
-      <p class="we-note">同一绕组可分配到第 1、3 等不连续层。先生成自动方案、拆分层，再上下移动；也可手动添加。相邻同绕组使用层间绝缘，不同绕组使用绕组间绝缘。</p>
+      <p class="we-note">同一绕组可分配到第 1、3 等不连续层。先生成自动方案、拆分层，再上下移动；也可手动添加。每层前的绝缘按紧邻的内侧层判断：同绕组用“同绕组层间绝缘”，不同绕组用“不同绕组间绝缘”。交错绕制时，请按下表的相邻关系调整对应厚度。</p>
       <p v-if="!automaticReady" class="we-note">生成自动方案前，请点击右上角“评估 / 刷新截面”；仅使用后端返回的实际排层，不推测未计算的匝数。</p>
       <template v-if="manualMode">
-        <div class="we-layer-scroll"><table class="we-table we-layer-table"><thead><tr><th>选择</th><th>实体层</th><th>绕组</th><th>本层匝数</th><th>本层绕法</th></tr></thead><tbody>
+        <div class="we-layer-scroll"><table class="we-table we-layer-table"><thead><tr><th>选择</th><th>实体层</th><th>绕组</th><th>本层匝数</th><th>本层绕法</th><th>本层前绝缘</th><th>厚度 / mm</th></tr></thead><tbody>
           <tr v-for="(entry, index) in plan" :key="index" :class="{ 'we-selected': selectedLayer === index }" @click="selectedLayer = index">
             <td><input type="radio" name="physical-layer-selection" :aria-label="`选择第 ${index + 1} 层`" :checked="selectedLayer === index" @change="selectedLayer = index" /></td><td>L{{ index + 1 }}</td>
             <td><select :aria-label="`第 ${index + 1} 层绕组`" :value="entry.winding_id" @change="editLayer(index, 'winding_id', ($event.target as HTMLSelectElement).value)"><option v-for="row in rows" :value="row.id">{{ row.id }}</option><option v-if="!rows.some((row) => row.id === entry.winding_id)" :value="entry.winding_id">{{ entry.winding_id }} · 已不存在</option></select></td>
             <td><input type="number" min="1" max="10000000" step="1" :aria-label="`第 ${index + 1} 层匝数`" :value="entry.turns" @change="editLayer(index, 'turns', ($event.target as HTMLInputElement).value)" /></td>
             <td><select :aria-label="`第 ${index + 1} 层绕法`" :value="entry.winding_style || ''" @change="editLayer(index, 'winding_style', ($event.target as HTMLSelectElement).value)"><option value="">跟随该绕组</option><option v-for="style in styles" :value="style.value">{{ style.label }}</option></select></td>
-          </tr><tr v-if="!plan.length"><td colspan="5" class="we-empty">尚未添加实体层。新层初值为 1 匝，请按实际方案修改。</td></tr>
+            <td class="we-interface-label">{{ layerInsulation[index].label }}</td>
+            <td>{{ layerInsulation[index].thickness == null ? '—' : mm(layerInsulation[index].thickness) }}</td>
+          </tr><tr v-if="!plan.length"><td colspan="7" class="we-empty">尚未添加实体层。新层初值为 1 匝，请按实际方案修改。</td></tr>
         </tbody></table></div>
         <div class="we-actions"><button type="button" :disabled="plan.length >= 1000 || !rows.length" @click="addLayer">添加层</button><button type="button" :disabled="selectedLayer === null" @click="removeLayer">删除所选层</button><button type="button" :disabled="selectedLayer === null || selectedLayer === 0" @click="moveLayer(-1)">所选层上移</button><button type="button" :disabled="selectedLayer === null || selectedLayer === plan.length - 1" @click="moveLayer(1)">所选层下移</button><button type="button" :disabled="selectedLayer === null || plan.length >= 1000" @click="splitLayer">拆分所选层</button></div>
         <div class="we-allocations"><div v-for="row in allocations" :key="row.id" :class="{ 'we-allocation-ok': row.complete }"><strong>{{ row.id }}</strong><span>已分配 {{ row.assigned }} / {{ row.turns || '待计算' }} 匝</span><small>实体层：{{ row.indices.length ? row.indices.join('、') : '未分配' }}</small><span>{{ row.complete ? '分配完整' : '待补齐 / 调整' }}</span></div></div>
@@ -380,6 +414,7 @@ function mm(value: any) { return value === null || value === undefined ? "" : Nu
     <div v-if="assessmentFresh && assessment?.configured" class="we-assessment" :class="{ 'we-overflow': assessment.fits === false }" role="status"><strong>{{ assessment.fits === true ? '当前几何预评估：窗口可容纳' : assessment.fits === false ? '当前几何预评估：窗口存在溢出' : '当前几何方案需修正后再评估' }}</strong><div v-if="assessment.fits === true || assessment.fits === false" class="we-facts"><span>所需径向高度 <b>{{ fmt(assessment.required_height * 1000, 'mm') }}</b></span><span>高度余量 <b>{{ fmt(assessment.height_margin * 1000, 'mm') }}</b></span><span>物理层数 <b>{{ fmt(assessment.total_layer_count, '层') }}</b></span></div><p v-for="warning in assessment.warnings" :key="warning">{{ warning }}</p></div>
     <p v-else-if="assessment" class="we-note">{{ assessmentFresh ? '请填写大于 0 的窗口净宽与净高，再进行评估。' : '配置已变化，旧几何评估不再用于显示容量。请刷新截面。' }}</p>
     <p v-if="previewError" class="we-error" role="alert">{{ previewError }}</p><p v-if="localMessage" class="we-note" role="status">{{ localMessage }}</p>
+    <WindingCanvas v-if="assessment?.editable && assessment?.cross_sections?.length" :assessment="assessment" :config="config" @change="moveWire" />
     <p class="we-disclaimer">几何预评估不是量产工艺或安规结论。骨架挡墙仅作示意，不占用所填净窗口；未包含引线、交叉线、圆角和制造公差。利兹线压扁为等面积假设，须用实物外径与绝缘确认。所有设置不回写电气股数、DCR、铜损、漏感或耦合系数 kij。</p>
   </section>
 </template>
@@ -420,6 +455,7 @@ function mm(value: any) { return value === null || value === undefined ? "" : Nu
 .we-layer-table td:nth-child(4) { min-width: 110px; width: 20%; }
 .we-layer-table td:nth-child(5) { min-width: 185px; }
 .we-layer-table td:nth-child(3) { min-width: 110px; }
+.we-interface-label { min-width: 205px; }
 .we-checkbox { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; min-height: 38px; }
 .we-empty { color: #697b91; padding: 20px !important; text-align: center; cursor: default; }
 .we-facts { display: flex; flex-wrap: wrap; gap: 10px 22px; background: #f1f6fc; border-radius: 7px; padding: 11px 13px; margin-top: 14px; font-size: 14px; color: #49617f; }

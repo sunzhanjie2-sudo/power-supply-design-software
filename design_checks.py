@@ -61,9 +61,31 @@ def check_catalog(p, res, loop=None, loop_error=None):
         if not dev.get('ok'):
             add('magnetics'+suffix, title+'选芯', None, state='review', note=dev.get('reason', '选芯失败'))
             continue
+        if dev.get('design_enabled') is False:
+            for cid, label, actual, key in (
+                    ('inductor_rms', '成品电感 RMS 电流能力', dev['I_rms'], 'inductor_rated_current'),
+                    ('inductor_peak', '成品电感饱和电流能力', dev['I_pk'], 'inductor_saturation_current')):
+                rating = dev[key]
+                add(cid, label, actual, rating if rating > 0 else None, unit='A',
+                    state=None if rating > 0 else 'undefined',
+                    note='与用户填写的厂家额定值比较，未含温度降额或 L(I) 曲线；0 表示未提供。')
+            add('inductor_dcr', '成品电感 DCR 损耗覆盖', dev['R_dc'] or None,
+                unit='Ω', state='pass' if dev['R_dc'] > 0 else 'undefined',
+                note='仅确认已填入 DCR，不代表选型通过；直流铜损 Irms²×DCR。')
+            add('inductor_extra_loss', '成品电感附加损耗覆盖', dev['P_extra'] or None,
+                unit='W', state='review' if dev['P_extra'] > 0 else 'undefined', note=dev['note'])
+            add('inductor_thermal', '成品电感温升', None, state='undefined',
+                note='未输入经过验证的热模型，须按厂家温升曲线或实测核对；不使用虚构的磁芯尺寸估温升。')
+            continue
         add('B_sat'+suffix, title+'峰值磁密', dev['B_pk'], p['Bsat'], '<', unit='T')
         add('temp_rise'+suffix, title+'估算温升', dev['dT'], p.get('temp_rise_limit', 40), unit='K')
         add('window_fill'+suffix, title+'裸铜窗口填充率', dev['fill'], 1., note='未含绝缘、骨架、工艺余量。')
+        if kind == 'transformer' and dev.get('gap_design'):
+            gap = dev['gap_design']
+            add('transformer_gap', '线性磁路下目标励磁电感的可实现性', gap['target_inductance_H'],
+                gap['L_ungapped_H'], unit='H',
+                state='pass' if gap['status']=='estimated' else 'review' if gap['status']=='infeasible' else 'undefined',
+                note=gap['note'])
     if loop is None:
         add('loop', '环路结果', None, state='undefined', note=loop_error or '环路依赖加载后计算。')
     elif loop['fc'] is None:

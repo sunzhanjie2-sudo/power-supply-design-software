@@ -100,7 +100,9 @@ def table(doc, headers, rows, widths=None, math_columns=()):
     t = doc.add_table(rows=1, cols=len(headers))
     t.alignment = WD_TABLE_ALIGNMENT.CENTER
     t.autofit = False
-    widths = widths or [7.1/len(headers)]*len(headers)
+    section=doc.sections[-1]
+    available=(section.page_width-section.left_margin-section.right_margin)/914400
+    widths = widths or [available/len(headers)]*len(headers)
     for col,w in zip(t.columns,widths):
         col.width = Inches(w)
     pr = t._tbl.tblPr
@@ -208,7 +210,9 @@ def equation(doc, text, numerator=None, denominator=None):
     p._p.append(m)
     count=getattr(doc, '_equation_count', 0)+1
     doc._equation_count=count
-    p.paragraph_format.tab_stops.add_tab_stop(Inches(7.0), WD_TAB_ALIGNMENT.RIGHT)
+    sec=doc.sections[-1]
+    usable=(sec.page_width-sec.left_margin-sec.right_margin)/914400
+    p.paragraph_format.tab_stops.add_tab_stop(Inches(usable-.1), WD_TAB_ALIGNMENT.RIGHT)
     _font(p.add_run(f'\t({count})'),9)
     return p
 

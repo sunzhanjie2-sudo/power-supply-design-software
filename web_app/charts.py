@@ -76,6 +76,18 @@ def render(run, path, case_id, kind, output=1):
             if semi.get('auxiliary'):other += [('辅助 MOS',semi['auxiliary']['P_total'])]
             for ax,labels,values,title in ((axes[0],names,values,'Q1 损耗分解'),(axes[1],[r[0] for r in other],[r[1] for r in other],'整流 / 辅助器件损耗')):
                 bars=ax.barh(labels,values,color='#2676b9');ax.invert_yaxis();ax.bar_label(bars,fmt='%.3g W',padding=4);ax.set(title=title,xlabel='W');ax.set_xlim(0,max(values+[.01])*1.3)
+        elif kind in ('magnetics','magnetic_flux') and (result['mag'].get('inductor') or {}).get('design_enabled') is False:
+            ind = result['mag']['inductor']
+            ax = fig.subplots()
+            if kind == 'magnetics':
+                bars=ax.bar(['直流铜损','用户附加损耗'],[ind['P_cu'],ind['P_extra']],color=['#2676b9','#4aa996'])
+                ax.bar_label(bars,fmt='%.3g W',padding=5)
+                ax.set(title='外购成品电感 · 已计入的损耗',ylabel='W')
+                ax.text(.5,-.13,'未提供的附加损耗不代表为零；温升未评估',transform=ax.transAxes,ha='center')
+            else:
+                ax.set_axis_off()
+                ax.text(.5,.55,'外购成品电感 · 不设计磁芯与绕组',transform=ax.transAxes,ha='center',fontsize=14)
+                ax.text(.5,.4,'L 仍参与工作点、波形与环路；磁密 / 温升未评估',transform=ax.transAxes,ha='center')
         elif kind in ('losses','magnetics'):
             if kind == 'losses':
                 names, values = [], []

@@ -20,6 +20,44 @@ and Design of the Feedback Loop", Proc. Powercon 10, 1983.
 import numpy as np
 
 
+def _frequency_values(model, points):
+    """Evaluate the existing model at every supplied complex point.
+
+    NumPy's batched solve avoids thousands of Python calls for state-space
+    plants. Bounded chunks keep the temporary matrices small even with many
+    capacitor states. No transfer-function conversion or pole cancellation.
+    Always return (outputs, inputs, frequencies), like squeeze=False.
+    """
+    import control as ct
+    from calculation_scheduler import check_calculation_cancelled
+
+    points = np.atleast_1d(np.asarray(points, dtype=complex))
+    if not isinstance(model, ct.StateSpace):
+        return np.asarray(model(points, squeeze=False))
+    count = model.nstates
+    if not count:
+        return np.broadcast_to(model.D[:, :, None],
+                               (*model.D.shape, len(points))).astype(complex).copy()
+    result = np.empty((model.noutputs, model.ninputs, len(points)), dtype=complex)
+    identity = np.eye(count)
+    # Allow for the shifted matrix, solver workspace and right-hand side.
+    bytes_per_point = 16 * (3*count*count + 2*count*model.ninputs)
+    chunk = max(1, min(256, 8*1024*1024 // max(bytes_per_point, 1)))
+    for start in range(0, len(points), chunk):
+        check_calculation_cancelled()
+        values = points[start:start+chunk]
+        try:
+            states = np.linalg.solve(values[:, None, None]*identity-model.A,
+                np.broadcast_to(model.B, (len(values), *model.B.shape)))
+            response = model.C @ states + model.D
+            result[:, :, start:start+chunk] = np.moveaxis(response, 0, -1)
+        except np.linalg.LinAlgError:
+            # At an exact pole retain python-control's inf/nan diagnostics;
+            # one singular frequency must not discard the other frequencies.
+            result[:, :, start:start+chunk] = model(values, squeeze=False)
+    return result
+
+
 def analyze_loop(p, models, op=None, n=6000):
     """Shared scan; undefined is None, never the last sampled frequency."""
     import control as ct
@@ -29,14 +67,14 @@ def analyze_loop(p, models, op=None, n=6000):
     limit = metadata.get('frequency_limit') if metadata else None
     scan_margin = bool(limit or (metadata and metadata.get('experimental')))
     f = np.logspace(-2, np.log10(limit or max(fs * 10, 1e6)), n)
-    bank = np.asarray(full(2j*np.pi*f, squeeze=False)) if full is not None else None
+    bank = _frequency_values(full, 2j*np.pi*f) if full is not None else None
     if bank is not None:
         feedback = metadata['feedback_output']-1
         plant = bank[feedback, 0]
-        compensator = np.asarray(models[1](2j*np.pi*f)).ravel()
+        compensator = _frequency_values(models[1], 2j*np.pi*f).ravel()
         gains = [plant, compensator, plant*compensator]
     else:
-        gains = [np.asarray(g(2j * np.pi * f)).ravel() for g in models]
+        gains = [_frequency_values(g, 2j*np.pi*f).ravel() for g in models]
     phases = []
     for gain in gains:
         ph = np.degrees(np.unwrap(np.angle(gain)))
@@ -121,7 +159,7 @@ def plant_phase_unwrapped(G, fc, n=400):
     fc/100 to fc and unwrap.  A phase that sits on the +pi branch (inverting
     plants: DC phase = -180 == +180 in np.angle) is pushed back down by 360."""
     f = np.logspace(np.log10(max(fc / 100.0, 1e-3)), np.log10(fc), n)
-    ph = np.unwrap([np.angle(G(1j * 2 * np.pi * ff)) for ff in f])
+    ph = np.unwrap(np.angle(_frequency_values(G, 2j*np.pi*f).ravel()))
     ph = float(np.degrees(ph[-1]))
     if ph > 90.0:                      # wrapped from the (-360, -180) branch
         ph -= 360.0

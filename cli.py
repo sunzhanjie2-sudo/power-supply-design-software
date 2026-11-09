@@ -143,11 +143,36 @@ def main():
     r.add_argument('--spec', required=True)
     r.add_argument('--out', required=True, help='.docx 或 .xlsx')
 
+    geometry=sub.add_parser('geometry',help='导出变压器三维建模数据包')
+    geometry.add_argument('--spec',required=True)
+    geometry.add_argument('--profile',help='独立的 power-transformer.model-input.v1 JSON')
+    geometry.add_argument('--out',required=True,help='.zip')
+    verify=sub.add_parser('verify-geometry',help='验证并读取变压器建模数据包')
+    verify.add_argument('package')
+
     sp = sub.add_parser('spice', help='导出固定频率反激 SSR 通用闭环 LTspice 工程')
     sp.add_argument('--spec', required=True)
     sp.add_argument('--out', required=True, help='可移植 ZIP 工程')
 
     args = ap.parse_args()
+    if args.cmd in ('geometry','verify-geometry'):
+        from pathlib import Path
+        from zipfile import BadZipFile
+        from transformer_geometry import export_geometry_package,read_geometry_package,strict_json
+        try:
+            if args.cmd=='geometry':
+                from design_engine.service import calculate
+                source=Path(args.spec);raw=source.read_bytes();cfg=strict_json(raw)
+                profile=strict_json(Path(args.profile).read_bytes()) if args.profile else None
+                run=calculate(cfg,analysis='endpoints',include_loop=False,include_cross_regulation=False,include_efficiency=False)
+                result=export_geometry_package(run,args.out,cfg,original_bytes=raw,original_name=source.name,profile=profile)
+            else:
+                g=read_geometry_package(args.package)
+                result=dict(source=g['source'],ready=g['ready'],missing_fields=g['missing_fields'])
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+        except (OSError,TypeError,ValueError,BadZipFile) as exc:
+            ap.error(str(exc))
+        return
 
     if args.cmd == 'spice':
         from design_engine.specification import load_spec

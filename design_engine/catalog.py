@@ -27,14 +27,14 @@ def parameter_catalog(topology=None):
         display_unit = meta.unit if meta else ''
         row = dict(name=key, default=default, type=kind,
                    label=meta.label if meta else key, symbol=meta.symbol if meta else key,
-                   unit='' if display_unit in ('%', '倍', '股', '匝') else display_unit,
+                   unit='' if display_unit in ('%', '倍', '股', '匝','根') else display_unit,
                    display_unit=display_unit, display_factor=meta.display_factor if meta else 1.,
                    category=groups.get(key, ('options', '选项与结构化配置'))[0],
                    group=groups.get(key, ('options', '选项与结构化配置'))[1],
                    topologies=list(meta.topologies) if meta else [],
                    enabled_by=meta.enabled_by if meta else '',
                    auto_zero=bool(meta and meta.auto),
-                   deprecated=key in ('Rd_diode', 'Rd_din', 'Rd_dout', 'tr', 'tf', 'Vf', 'gfs'))
+                   deprecated=key in ('Rd_diode', 'Rd_din', 'Rd_dout', 'tr', 'tf', 'Vf', 'gfs', 'le_core'))
         if topology is not None:
             row['applicable'] = applicable(key, topology, 'Peak Current Mode') if meta else True
         rows.append(row)

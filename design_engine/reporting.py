@@ -35,7 +35,10 @@ def report_for_result(p, res, user_spec=None, range_snapshot=None):
     failed = [c for c in checks if c['state'] in ('review', 'undefined')]
 
     warnings = []
-    if op.get('mode') == 'DCM' and not op.get('coupled_model'):
+    from plants import uses_dcm_peak_energy, DCM_PEAK_NOTE
+    if uses_dcm_peak_energy(p,op):
+        warnings.append(DCM_PEAK_NOTE)
+    elif op.get('mode') == 'DCM' and not op.get('coupled_model'):
         warnings.append('DCM 工况 (轻载或 L 偏小): 环路按单极点 DCM 模型近似')
     if op['topology'] in ('FLYBACK',) and op.get('mode') == 'CCM' and not op.get('coupled_model'):
         warnings.append(f"反激 CCM 存在右半平面零点 f_RHPZ = {op['rhp_zero']:.0f} Hz, fc 应远低于它")
@@ -50,6 +53,8 @@ def report_for_result(p, res, user_spec=None, range_snapshot=None):
         warnings.extend(model['ref']+'：'+note for note in model.get('extrapolations',[]))
 
     mdev = md.get('inductor') or md.get('transformer') or {}
+    if mdev.get('design_enabled') is False:
+        warnings.append(mdev['note'])
     report = dict(
         component_management=compact_projection(evaluate_components(p, res)),
         ok=True,diode_models=copy.deepcopy(res.get('diode_models',[])),
@@ -88,13 +93,18 @@ def report_for_result(p, res, user_spec=None, range_snapshot=None):
                         Ae=mdev.get('Ae'), Ve=mdev.get('Ve'), Wa=mdev.get('Wa'),
                         MLT=mdev.get('MLT'), MLT_source=mdev.get('MLT_source'), Np=mdev.get('Np'),
                         Ns=mdev.get('Ns'), N=mdev.get('N'),
-                        gap=mdev.get('gap'), B_pk=float(mdev['B_pk']),
-                        dB=float(mdev['dB']), P_cu=float(mdev['P_cu']),
-                        P_core=float(mdev['P_core']),
-                        P_total=float(mdev['P_total']), dT=float(mdev['dT']),
+                        gap=mdev.get('gap'), B_pk=mdev['B_pk'],
+                        dB=mdev['dB'], P_cu=float(mdev['P_cu']),
+                        P_core=mdev['P_core'],
+                        P_total=float(mdev['P_total']), dT=mdev['dT'],
                         thermal_model=mdev.get('thermal_model','convection_estimate'),
                         Rth_transformer=mdev.get('Rth_transformer'),
-                        fill=float(mdev['fill']))
+                        fill=mdev['fill'], design_enabled=mdev.get('design_enabled', True),
+                        R_dc=mdev.get('R_dc'), L=mdev.get('L'),
+                        I_pk=mdev.get('I_pk'), I_rms=mdev.get('I_rms'),
+                        inductor_rated_current=mdev.get('inductor_rated_current'),
+                        inductor_saturation_current=mdev.get('inductor_saturation_current'),
+                        P_extra=mdev.get('P_extra'), note=mdev.get('note'))
                    if md.get('ok') else dict(ok=False,
                                              reason=md.get('reason', ''))),
         stress={k: dict(v) for k, v in stress.items()},

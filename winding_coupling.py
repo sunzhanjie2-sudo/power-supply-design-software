@@ -38,7 +38,7 @@ def _positive(value, label, *, allow_zero=False):
 
 
 def validate_coupling_config(config, count):
-    """Validate K alone; old saved ``dcr`` values are inactive legacy data.
+    """Validate K and optional field-derived self inductances.
 
     Winding resistance is derived from the resolved conductor geometry.  A
     legacy DCR value must neither override that geometry nor reject an
@@ -51,6 +51,12 @@ def validate_coupling_config(config, count):
         raise ValueError('coupling_config 必须为配置字典')
     if not isinstance(config.get('enabled', False), bool):
         raise ValueError('耦合矩阵 enabled 必须为布尔值')
+    if not isinstance(config.get('field_matrix_enabled', False), bool):
+        raise ValueError('场解矩阵 field_matrix_enabled 必须为布尔值')
+    order = config.get('port_order', labels)
+    if not isinstance(order, (list, tuple)) or len(order) != size or set(order) != set(labels):
+        raise ValueError('场解矩阵端口必须恰好对应 P 和当前各路 OUT，不能缺失或重复')
+    indices = [order.index(label) for label in labels]
     raw_k = config.get('k', [])
     if not isinstance(raw_k, (list, tuple)):
         raise ValueError('耦合矩阵 k 必须为列表')
@@ -63,6 +69,13 @@ def validate_coupling_config(config, count):
             k[i, j] = _positive(value, f'k({labels[i]},{labels[j]})', allow_zero=True)
             if k[i, j] > 1:
                 raise ValueError(f'k({labels[i]},{labels[j]}) 必须满足 0 ≤ k ≤ 1')
+    k = k[np.ix_(indices, indices)]
+    self_l = config.get('self_inductances_H')
+    if self_l is not None:
+        if not isinstance(self_l, (list, tuple)) or len(self_l) != size:
+            raise ValueError('场解自感列表必须与端口一一对应，单位为 H')
+        self_l = np.array([_positive(self_l[i], f'{labels[j]} 场解自感')
+                           for j, i in enumerate(indices)], dtype=float)
     if not np.allclose(np.diag(k), 1., rtol=0., atol=1e-12):
         raise ValueError('耦合矩阵对角线必须为 1')
     if not np.allclose(k, k.T, rtol=0., atol=1e-12):
@@ -73,7 +86,9 @@ def validate_coupling_config(config, count):
     ideal = bool(np.allclose(k, np.ones_like(k), rtol=0., atol=1e-13))
     if not ideal and eigenvalues[0] <= 1e-11:
         raise ValueError('耦合矩阵为奇异/近奇异：本版仅支持正定矩阵或全部 kij=1 的理想变压器')
-    return dict(labels=labels, K=k, ideal=ideal, eigenvalues=eigenvalues)
+    return dict(labels=labels, K=k, ideal=ideal, eigenvalues=eigenvalues,
+                self_inductances_H=self_l,
+                inductance_source='field-matrix' if self_l is not None else 'turns-ratio')
 
 
 def resolve_winding_geometry(p, nominal_op, rails=None):
@@ -106,7 +121,7 @@ def resolve_winding_geometry(p, nominal_op, rails=None):
         raise ValueError('绕组几何预设计失败：' + transformer.get('reason', '无可用磁芯'))
     hardware = {key: transformer[key] for key in
                 ('core', 'core_geometry', 'MLT', 'MLT_source', 'Np', 'Ns', 'd_wire_p', 'd_wire_s',
-                 'n_strand_p', 'n_strand_s', 'R_dc_p', 'R_dc_s')}
+                 'n_strand_p', 'n_strand_s', 'parallel_wires_p', 'parallel_wires_s', 'R_dc_p', 'R_dc_s')}
     hardware.update(rho=float(p['rho']), windings=[],
                     auto_wire_sizing='nominal-predesign-frozen',
                     primary_wire_source='manual' if p.get('d_wire_p', 0) > 0 else 'nominal-predesign')
@@ -123,16 +138,18 @@ def resolve_winding_geometry(p, nominal_op, rails=None):
             frozen = fixed
         count = int(frozen.get('Ns', count))
         strands = int(frozen.get('n_strand_s', rail['n_strand_s']))
+        from parallel_wires import count as wire_count
+        copies=wire_count(frozen if frozen else rail,'s')
         current = float(child.get('I_s_rms', child['I_d_rms']))
-        diameter = float(frozen.get('d_wire_s', rail['d_wire_s'])) or max(50e-6, mag.wire_diameter(current / strands, p['J']))
-        area = strands * math.pi * diameter ** 2 / 4.
+        diameter = float(frozen.get('d_wire_s', rail['d_wire_s'])) or max(50e-6, mag.wire_diameter(current / (strands*copies), p['J']))
+        area = strands * copies * math.pi * diameter ** 2 / 4.
         resistance = float(p['rho']) * hardware['MLT'] * count / area
         hardware['windings'].append(dict(id=int(rail.get('id', index)), Ns=int(count),
-            d_wire_s=float(diameter), n_strand_s=strands, R_dc=resistance,
+            d_wire_s=float(diameter), n_strand_s=strands, parallel_wires_s=copies, R_dc=resistance,
             wire_source='fixed-hardware' if frozen else 'manual' if rail.get('d_wire_s', 0) > 0 else 'nominal-predesign'))
     feedback = hardware['windings'][selected]
     hardware.update(Ns=feedback['Ns'], d_wire_s=feedback['d_wire_s'],
-                    n_strand_s=feedback['n_strand_s'], R_dc_s=feedback['R_dc'])
+                    n_strand_s=feedback['n_strand_s'],parallel_wires_s=feedback['parallel_wires_s'],R_dc_s=feedback['R_dc'])
     return hardware
 
 
@@ -169,7 +186,11 @@ def resolve_winding_model(p, rails=None, *, geometry=None, nominal_op=None):
         ratios.append(np_turns / ns)
         ratio_sources.append('actual-turns')
     ratios = np.array(ratios)
-    self_l = lp / ratios ** 2
+    self_l = validated['self_inductances_H']
+    if self_l is None:
+        self_l = lp / ratios ** 2
+    elif not math.isclose(float(self_l[0]), lp, rel_tol=1e-8, abs_tol=1e-15):
+        raise ValueError('原边电感与已采用的场解矩阵不一致，请重新仿真或取消场解矩阵')
     inductance = k * np.sqrt(np.outer(self_l, self_l))
     leakage = 0. if validated['ideal'] else lp * (1. - float(k[0, 1:] @ np.linalg.solve(k[1:, 1:], k[1:, 0])))
     resistance = np.array([geometry['R_dc_p']] + [w['R_dc'] for w in geometry['windings']], dtype=float)

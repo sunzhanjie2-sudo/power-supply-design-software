@@ -573,17 +573,23 @@ export function chart(p: Spec, res: Spec, kind: string, output = 1) {
       [res.mag.transformer, res.mag.inductor, ...(res.mag.inductors || [])]
         .filter(Boolean)
         .map((x: Spec, i: number) => ({
-          name: x.core + " " + (i + 1),
-          values: [x.P_cu, x.P_core],
+           name: (x.core_label || x.core) + " " + (i + 1),
+           values: [x.P_cu, x.P_core ?? 0, x.P_extra || 0],
         })),
-      ["铜损", "磁芯损耗"],
-      "磁件损耗 / W",
+        ["铜损", "已评估磁芯损耗", "已输入附加损耗"],
+        res.mag.inductor?.design_enabled === false
+          ? "成品电感损耗 / W（磁芯及交流损耗未单独评估）"
+          : "磁件损耗 / W",
     );
   if (kind === "magnetic_flux") {
     const tr = res.mag.transformer,
       dev = tr || res.mag.inductor,
       l = tr ? (p.topology === "ACF-FORWARD" ? p.Lm_forward : p.L) : p.L,
       n = tr ? dev.Np : dev.N;
+      if (dev.design_enabled === false)
+        return frame(text(80, 180,
+          "外购成品电感：未设计磁芯，磁密波形与温升未评估。", 23),
+          "成品电感 / 磁密未评估");
     const z = res.op.acf_solution,
       fluxPoints = z
         ? z.t.map((v: number, j: number) => [

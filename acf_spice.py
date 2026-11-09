@@ -39,8 +39,15 @@ def render_stage(q, rails, geometry, kvals, settings):
     body = [s for s in body if not s.startswith(('XD_SN1 ', 'R_SN1 ', 'C_SN1 '))]
     params = {k: v for k, v in params.items() if not k.startswith(('D_SN1_', 'R_SN1', 'C_SN1'))}
     params['LP'] = float(q['Lm_forward'])
+    coupling = q.get('coupling_config') or {}
+    self_l = None
+    if coupling.get('enabled') or coupling.get('field_matrix_enabled'):
+        from winding_coupling import validate_coupling_config
+        self_l = validate_coupling_config(coupling, len(rails))['self_inductances_H']
+        if self_l is not None:
+            params['LP'] = float(self_l[0])
     for i, (r, w) in enumerate(zip(rails, geometry['windings']), 1):
-        params['LS'+str(i)] = params['LP']*(w['Ns']/geometry['Np'])**2
+        params['LS'+str(i)] = float(self_l[i]) if self_l is not None else params['LP']*(w['Ns']/geometry['Np'])**2
         # Same dot at VIN and rectN: secondary transfers power during ON.
         index = next(j for j, s in enumerate(body) if s.startswith(f'LS{i} '))
         body[index] = body[index].replace(f'LS{i} sgnd rect{i}', f'LS{i} rect{i} sgnd')

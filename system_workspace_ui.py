@@ -579,6 +579,7 @@ class SystemWorkspace:
         self.project=model.normalize_project(self.project);self.selected=('unit',identity);self.changed('LDO 已增加，连接上游后进入专用线性稳压设计。');self.render()
 
     def load_ldo_example(self):
+        self._geometry_origin=None
         from app_resources import resource_path
         self.project=model.load_project(resource_path('examples/SYSTEM_LDO.json'));self.selected=None;self.changed('已载入通用 LDO 示例，型号及额定资料待核对。');self.render();self.fit_canvas()
 
@@ -625,6 +626,7 @@ class SystemWorkspace:
         self.render()
 
     def new(self):
+        self._geometry_origin=None
         self.project = model.normalize_project(model.fresh_project())
         self.title.set(self.project['title'])
         self.path, self.selected, self.removal = None, None, None
@@ -632,6 +634,7 @@ class SystemWorkspace:
         self.render()
 
     def load_example(self):
+        self._geometry_origin=None
         from pathlib import Path
         self.project=model.load_project(Path(__file__).parent/'examples/SYSTEM_AUX_ORING.json')
         self.title.set(self.project['title'])
@@ -645,8 +648,13 @@ class SystemWorkspace:
         if not path:
             return
         try:
-            self.project = model.load_project(path)
-            raw = json.loads(__import__('pathlib').Path(path).read_text(encoding='utf-8-sig'))
+            from pathlib import Path
+            source=Path(path).read_bytes()
+            raw=json.loads(source.decode('utf-8-sig'))
+            self.project = model.load_project_data(raw)
+            self._geometry_origin=None
+            if not raw.get('schema_version') and not raw.get('schema') and len(self.project['units'])==1:
+                self._geometry_origin=(self.project,self.project['units'][0]['id'],(Path(path).name,source))
             self.path = path if raw.get('schema_version') == model.SCHEMA else None
             self.title.set(self.project['title'])
             self.selected, self.removal = None, None
@@ -684,6 +692,9 @@ class SystemWorkspace:
             self.project['activeUnit'] = identity
             window = tk.Toplevel(self.root)
             self.calculator = Designer(window, initial_config=copy.deepcopy(unit['spec']), on_return=lambda app: self.return_from_unit(identity, app))
+            origin=getattr(self,'_geometry_origin',None)
+            if origin and origin[0] is self.project and origin[1]==identity:
+                self.calculator._geometry_source=origin[2]
             window.title(identity + ' · ' + unit['name'] + ' · 完整电源设计')
             self.root.withdraw()
         except Exception as error:

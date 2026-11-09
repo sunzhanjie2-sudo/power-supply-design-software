@@ -19,7 +19,7 @@ def resource_path(relative):
         return ROOT / 'resources' / relative
     if relative.name in ('icon.png', 'icon.ico') and len(relative.parts) == 1:
         return ROOT / 'resources' / 'icons' / relative
-    if str(relative) == '计算方法与公式说明.docx':
+    if str(relative) in ('计算方法与公式说明.docx', '自动计算参数依据.docx'):
         return ROOT / 'docs' / 'reference' / relative
     if str(relative) == '多路反激电源设计入门教程.docx':
         return ROOT / 'docs' / 'tutorials' / relative

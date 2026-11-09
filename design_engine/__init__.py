@@ -5,4 +5,4 @@ Electrical formula implementations remain in their existing modules.
 """
 
 CONTRACT_VERSION = 'power-design.snapshot.v1'
-MODEL_VERSION = 'power-model-2026-10-28-acf-periodic'
+MODEL_VERSION = 'power-model-2026-11-08-qr-coupled-valley'

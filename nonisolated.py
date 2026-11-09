@@ -34,7 +34,7 @@ SETTINGS={
  'niso_ramp_ratio':(.1,.001,1.,'Buck 电压模式：斜坡幅值 / 输入电压',''),
  'niso_ith_gain':(.05,.001,1.,'LTC3864 参考：ITH 至 CS 等效指令增益（可配置近似）','V/V'),
  'niso_lm_cs_resistor':(0.,0.,10000.,'LM5022 外部 CS 滤波串阻（影响斜坡）','Ω'),
- 'niso_inductor_dcr':(-1.,-1.,10.,'电感 DCR，-1=由磁件几何计算','Ω'),
+ 'niso_inductor_dcr':(-1.,-1.,10.,'自制电感 DCR 覆盖，-1=几何；成品取主界面 DCR','Ω'),
  'niso_edge_model':(0.,0.,1.,'开关边沿：0=快速闭环，1=常数 Coss/Cj',''),
 }
 
@@ -171,6 +171,11 @@ def solve(p,nominal):
     from magnetics import design_inductor
     ind=design_inductor(nominal,q)
     dcr=s.get('niso_inductor_dcr',-1.)
+    from inductor_selection import purchased
+    if purchased(q):
+        # Purchased component data owns DCR in both calculation and SPICE.
+        # Do not silently reuse a stale controller/geometry override.
+        dcr=ind['R_dc']
     if dcr<0:
         if not ind.get('ok'):raise ValueError('电感几何设计未成功，无法确定仿真 DCR')
         dcr=ind['R_dc']

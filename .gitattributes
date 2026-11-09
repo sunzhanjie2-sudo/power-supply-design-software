@@ -1,0 +1,3 @@
+# The embedded runtime records SHA-256 of the exact upstream/adapted bytes.
+# Preserve those bytes across Git checkouts instead of converting line endings.
+/transformer_field_runtime/** -text

@@ -412,6 +412,9 @@ def design_inductor(op, p, I_rms=None, B_pk_ratio=1.0):
     op: operating point (needs f_sw);  p: params with Bmax, J, Ku, rho, k/a/b.
     Returns a dict with the full design + losses.
     """
+    from inductor_selection import purchased, design
+    if purchased(p):
+        return design(op if I_rms is None else dict(op, I_L_rms=I_rms), p)
     fixed = p.get('_fixed_inductor') or {}
     if fixed:
         p = dict(p, core_choice=fixed['core'], MLT=fixed['MLT'])
@@ -498,7 +501,8 @@ def design_transformer(op, p, I_p_rms, I_s_rms, n_ratio=None, Np=None,
     if fixed:
         p = dict(p, core_choice=fixed['core'], MLT=fixed['MLT'],
                  **{k: fixed[k] for k in ('Np', 'Ns', 'd_wire_p', 'd_wire_s',
-                                          'n_strand_p', 'n_strand_s')})
+                                          'n_strand_p', 'n_strand_s')},
+                 **{k: fixed.get(k,p.get(k,1)) for k in ('parallel_wires_p','parallel_wires_s')})
     f = op['f_sw']
     Bmax, J, Ku, rho = p['Bmax'], p['J'], p['Ku'], p['rho']
     k, a, b = p['k_core'], p['a_core'], p['b_core']
@@ -521,6 +525,9 @@ def design_transformer(op, p, I_p_rms, I_s_rms, n_ratio=None, Np=None,
     Ns_u = int(p.get('Ns', 0) or 0)
     strp = max(1, int(p.get('n_strand_p', 1) or 1))
     strs = max(1, int(p.get('n_strand_s', 1) or 1))
+    from parallel_wires import count
+    copies_p,copies_s=count(p,'p'),count(p,'s')
+    total_p,total_s=strp*copies_p,strs*copies_s
     dwp_u = float(p.get('d_wire_p', 0.0) or 0.0)     # m (displayed as mm)
     dws_u = float(p.get('d_wire_s', 0.0) or 0.0)
 
@@ -535,18 +542,18 @@ def design_transformer(op, p, I_p_rms, I_s_rms, n_ratio=None, Np=None,
         Ns = max(1, int(round(Np / n_ratio))) if n_ratio else 1
     Ns = max(1, Ns)
 
-    dw_p = dwp_u if dwp_u > 0 else wire_diameter(I_p_rms / strp, J)
-    dw_s = dws_u if dws_u > 0 else wire_diameter(I_s_rms / strs, J)
+    dw_p = dwp_u if dwp_u > 0 else wire_diameter(I_p_rms / total_p, J)
+    dw_s = dws_u if dws_u > 0 else wire_diameter(I_s_rms / total_s, J)
     A_p = np.pi * dw_p ** 2 / 4.0
     A_s = np.pi * dw_s ** 2 / 4.0
-    R_p = rho * MLT * Np / (strp * A_p)
-    R_s = rho * MLT * Ns / (strs * A_s)
+    R_p = rho * MLT * Np / (total_p * A_p)
+    R_s = rho * MLT * Ns / (total_s * A_s)
     Fr_p = ac_factor(dw_p, f, rho)
     Fr_s = ac_factor(dw_s, f, rho)
     P_cu = Fr_p * R_p * I_p_rms ** 2 + Fr_s * R_s * I_s_rms ** 2
-    fill = (Np * strp * A_p + Ns * strs * A_s) / max(Wa, 1e-30)
-    J_p = I_p_rms / (strp * A_p)
-    J_s = I_s_rms / (strs * A_s)
+    fill = (Np * total_p * A_p + Ns * total_s * A_s) / max(Wa, 1e-30)
+    J_p = I_p_rms / (total_p * A_p)
+    J_s = I_s_rms / (total_s * A_s)
 
     # flux: triangular (flyback).  NSE evaluated directly on the actual B(t)
     # waveform (book eq. 3.23 + 3.24); the closed form (3.25) is its analytic
@@ -561,15 +568,18 @@ def design_transformer(op, p, I_p_rms, I_s_rms, n_ratio=None, Np=None,
     t_b, B_t = flyback_flux_waveform(flux_op, Np, Ae)
     P_core = core_loss_nse_waveform(k, a, b, t_b, B_t, Ve)
     P_total = P_cu + P_core
+    from transformer_gap import estimate
+    gap_design = estimate(p, core, Np)
     return dict(ok=True, core=name, core_geometry=geometry_snapshot(core),
                 core_label=core.get('name') or name, MLT_source=mlt_source(p, name, fixed),
                 Ae=Ae, Ve=Ve, Wa=Wa, MLT=MLT, ap=ap,
                 Np=Np, Ns=Ns, n_actual=Np / Ns, d_wire_p=dw_p, d_wire_s=dw_s,
                 n_strand_p=strp, n_strand_s=strs, A_strand_p=A_p, A_strand_s=A_s,
+                parallel_wires_p=copies_p, parallel_wires_s=copies_s,
                 J_actual_p=J_p, J_actual_s=J_s, I_rms_p=I_p_rms, I_rms_s=I_s_rms,
                 R_dc_p=R_p, R_dc_s=R_s, Fr_p=Fr_p, Fr_s=Fr_s,
                 P_cu=P_cu, P_core=P_core, P_total=P_total, fill=fill,
-                B_pk=B_pk, dB=dB,
+                B_pk=B_pk, dB=dB, gap=gap_design['gap_m'], gap_design=gap_design,
                 **transformer_temperature(P_total, p))
 
 

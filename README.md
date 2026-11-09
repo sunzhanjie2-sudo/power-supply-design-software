@@ -11,13 +11,17 @@
 | 模块 | 功能 |
 | --- | --- |
 | 供电架构 | 拖动输入源、电源模块、LDO、负载和二极管 OR 汇流；编辑连接、支路压降及启用状态，进行级联电压与功率预算 |
+| 按规格生成初版 | 异步 Buck、LM5022 Boost 和 MP6005 定频 SSR 反激。反激可选满载 CCM / DCM，自动选磁芯、整数匝、励磁电感、各路电容、采样电阻并整定补偿。载入多路工程后沿用反馈路及各副边匝数比例，计算不同负载组合的端口电压和器件应力 |
 | 功率级 | Buck、Boost、CCM/DCM 反激、准谐振反激、有源钳位正激；分别计算 Vinmin/Vinmax 工作点及关键波形 |
-| 多路输出 | 隔离拓扑最多 6 路输出；选择主反馈路，按匝比估算其他输出；独立配置整流器、电容与绕组，评估耦合及交叉调整率 |
+| 多路输出 | 隔离拓扑最多 6 路输出；选择主反馈路，按实际匝数派生其他路参考；独立配置整流器、电容与绕组。定频反激、QR反激和有源钳位正激可启用非理想耦合矩阵，独立求解各路电流与负载角点电压 |
 | 半导体损耗 | 固定值快速估算或导入曲线计算；MOS 转移特性、栅电荷、米勒平台与 t1–t8 分段；二极管 If–Vf 导通损耗 |
 | 电容组 | 可增删的并联电容列表，每颗独立配置 C、ESR、ESL，计算分流、纹波和损耗 |
-| 磁件 | 标准及自定义磁芯、匝数、磁密、Steinmetz 损耗、DCR、电流密度、热阻温升；窗口横截面、利兹线压扁与分层交错绕制评估 |
+| 磁件 | 标准及自定义磁芯、匝数、磁密、Steinmetz 损耗、DCR、电流密度、热阻温升；窗口、利兹线、交错绕制及[三维绕组建模数据导出](docs/TRANSFORMER_GEOMETRY_EXPORT.md) |
+| 变压器场仿真（桌面） | 从画布单元的磁件页调用本机提取器与 Elmer。查看端口电感和耦合矩阵、漏感及采用场解参数前后的电源端点对比，再决定是否写回单元。[首次配置与操作](docs/TRANSFORMER_GEOMETRY_EXPORT.md#从磁件页生成仿真与闭环报告) |
+| 联合仿真报告（桌面） | 内置变压器提取内核，集中配置本机Elmer、磁芯CAD与LTspice；从当前绕制自动生成提取设置，支持模型配置包跨电脑导入/导出，串联场解、裕量、设计复算和真实电路对比Word。[使用范围](docs/JOINT_SIMULATION.md) · [换电脑配置](docs/PORTABLE_SIMULATION.md) |
 | 环路与补偿 | 功率级及补偿器 Bode 图、相位/增益裕度、二型/三型补偿、K 因子整定与补偿电路阻容反推 |
 | BOM 与降额 | 厂家、型号、封装、额定值及降额对照；缺失额定值和未覆盖应力明确标注待复核 |
+| 工程验证与验收（桌面） | 两端目标、计算、仿真、手录实测、余量与整改统一管理；证据绑定当前硬件，缺失或过期不判通过。[使用说明](docs/ENGINEERING_ACCEPTANCE.md) |
 | 工程报告 | Word、Excel、JSON；参数表与图像结合；Excel 按模块分 Sheet，Vinmin/Vinmax 左右对照；汇总系统与各单元报告 |
 | LTspice 联动 | 通用可配置行为控制器、可读 ASC 工程、仿真运行与计算对比；支持已实现的反激、QR、有源钳位正激及 Buck/Boost 模式 |
 | 自动化接口 | 无 GUI 的计算服务、Python API、CLI 和 MCP 入口，便于与其他工程工具联动 |
@@ -37,14 +41,24 @@
 5. 按需导出 LTspice 工程，复核计算与开关仿真的差异。
 6. 导出 Word/Excel 报告，保存工程 JSON 及系统连接。
 
+QR 多路 SSR 的交叉调整率：在左侧设置各路实际最大/最小功率，启用“绕组两两耦合”并填入正定 kij 矩阵，再到“拓扑 → 交叉调整率与电压范围”扫描。Word/Excel及联合仿真报告显示同一硬件在 Vinmin/Vinmax 下的电压包络、负载组合与实际开关频率。参考点由Kc选RCD一次，角点固定同一阻容联立平均钳位功耗，不重新选择R/C。没有负载差就不代表已覆盖轻重载；真空载或无自洽单周期谷底的角点明确留为未完成。QR直流跨调采用矩阵换流/退磁/恒定电容谷底时序，低频环路仍是约化模型，不能代替完整换流线性化或实测。详见 [模型与边界](docs/CROSS_REGULATION.md)，计算说明第20章。此功能覆盖桌面与本地Python网页/API，独立TypeScript浏览器内核暂未移植。
+
+桌面“工程评审 → 工程验证与验收”可设置目标、导入带参数指纹的仿真 JSON/ZIP、记录两端实测和整改依据。应用记录后保存工程；刷新两端计算是显式后台操作。设计 Word 与联合报告按“评审结论 → 需求与共同硬件 → 分模块双端对照 → 模型边界与整改 → 证据追溯”组织，Vinmin/Vinmax 固定左右顺序。联合报告在设计章节前串联磁件场解与参数回填，后接电路对比；缺失证据单独标注。Excel 每个模块一张表，两端左右对比，并新增验收页。本轮新验收编辑界面覆盖桌面，Python 网页/API 保留共享数据与报告；独立 TypeScript 路径尚未移植该界面。
+
 ## 快速开始
 
 ### Windows 便携版
 
-本机最新已构建版本：`releases/Windows-x64/20261031-chart-ui-fix/`。
+本机运行包位于 `releases/Windows-x64/`，功能和版本变化见 [更新日志](CHANGELOG.md)，构建方式见 [项目结构与发布](docs/PROJECT_STRUCTURE.md)。变压器支持完整线圈并绕，在磁件截面可点选、左右拖动及用方向键微调，位置随工程保存。内置示例并绕数为 1，磁材 DMR44、μi=2400，le=Ve/Ae。见 [并绕计算](docs/TRANSFORMER_ELECTRICAL.md)、[绕制操作](docs/WINDING_WINDOW.md) 与 [气隙说明](docs/TRANSFORMER_GAP.md)。
+
+桌面和本地 Python 网页均将“文件”“示例”“自动设计”分列；从“自动设计”选择“按规格生成初版”。选择 FLYBACK 后可比较 CCM 与 DCM。已配置多路输出时，额定电流和最小电流指所选反馈路，其他路沿用工程负载。选值说明见“帮助”中的《自动计算参数依据》第 8–10 页，可导入算例在 `output/反激自动设计初版/`。
 
 - 桌面版：在 `PowerDesignDesktop` 中双击 `SwitchingPowerSupplyDesign_V0.exe`。
 - 本地网页版：在 `PowerDesignWeb` 中双击 `StartWeb.cmd`。
+
+桌面 LTspice 配置窗口可先选“快速预检（推荐）”，确认两端输入的启动、稳态、电流及纹波，再选“完整对比”运行 FRA 和交叉负载。已通过的相同标称仿真可复用；任务范围、实际运行/复用来源在报告中列明。见 [仿真对比说明](docs/SPICE_COMPREHENSIVE_COMPARISON.md)。
+
+该版在“计算方法与公式说明”第 19 章及“多路反激入门教程”第 16.5–16.17 节加入三路反激交叉调整率完整算例：参数、互感矩阵、分段换流、实际求解迭代、16 个角点及统计结果。两份文档保持原入口，公式可在 Word 中编辑。
 
 复制完整程序文件夹，必须保留 `_internal`。运行包自带 Python 和计算依赖，目标电脑不需要安装 Python/Node；查看 Word/Excel 需要兼容的办公软件。Git 仓库不包含 EXE、虚拟环境或历史发布包，克隆源码后可按下文运行或自行构建。
 
@@ -91,6 +105,8 @@ print(report["ok"])
 ```
 
 ## 随附算例
+
+全部19份JSON示例（含系统工程内的单元）已补入真实器件型号、参考计算参数与原厂来源；加载后可在“关键器件BOM与降额”查看。具体选值、条件和待核项见[示例器件初选与数据依据](docs/EXAMPLE_REAL_PARTS.md)。已保存的用户工程不会自动覆盖。
 
 | 文件 | 用途 |
 | --- | --- |
@@ -144,10 +160,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_release.ps1 -Tar
 ## 文档
 
 - [开始使用](开始使用.md)、[中文手册](docs/MANUAL_ZH.md)、[项目结构与发布](docs/PROJECT_STRUCTURE.md)
-- [计算方法与公式说明（Word）](docs/reference/计算方法与公式说明.docx)、[多路反激入门教程（Word）](docs/tutorials/多路反激电源设计入门教程.docx)
+- [计算方法与公式说明（Word）](docs/reference/计算方法与公式说明.docx)、[多路反激入门教程（Word）](docs/tutorials/多路反激电源设计入门教程.docx)、[自动计算参数依据（Word）](docs/reference/自动计算参数依据.docx)
 - [系统架构](docs/SYSTEM_WORKSPACE.md)、[LDO](docs/LDO_DESIGN.md)、[BOM 与降额](docs/COMPONENT_BOM_DERATING.md)
 - [并联 ESR 环路模型](docs/PARALLEL_ESR_LOOP.md)、[寄生参数模型](docs/PARASITIC_MODELS.md)、[仿真对比](docs/SPICE_COMPREHENSIVE_COMPARISON.md)
 - [更新日志](CHANGELOG.md)、[图表 UI 修正](docs/CHART_UI_FIX.md)
+- [性能优化与复测](docs/PERFORMANCE.md)
 
 ## 模型边界与许可
 

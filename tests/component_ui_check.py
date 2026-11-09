@@ -70,7 +70,9 @@ class ComponentUIChecks(unittest.TestCase):
         self.assertTrue(alert.called)
         self.assertEqual(app._component_management['items']['Q1']['voltage_V'],200)
         # Loading another file must clear earlier file's metadata, not inherit it.
-        app._apply_config(copy.deepcopy(self.original))
+        legacy=copy.deepcopy(self.original)
+        legacy.pop('component_management',None)
+        app._apply_config(legacy)
         self.assertNotIn('Q1',app._component_management.get('items',{}))
         root.update();self.assertEqual(self.errors,[])
 

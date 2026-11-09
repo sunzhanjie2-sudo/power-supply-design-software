@@ -119,6 +119,20 @@ export function reviewCatalog(source: Spec, res: Spec, evaluation: Spec) {
     const suffix =
         devices.length > 1 ? (kind === "transformer" ? "_T" : "_L") : "",
       title = kind === "transformer" ? "变压器" : "电感";
+    if (d.design_enabled === false) {
+      for (const [key, label] of [
+        ["inductor_rated_current", "成品电感额定 RMS 电流"],
+        ["inductor_saturation_current", "成品电感饱和电流"],
+      ]) {
+        const rating = d[key] || null;
+        add(key, label, key === "inductor_rated_current" ? d.I_rms : d.I_pk,
+          rating, "<=", "A", rating ? undefined : "undefined",
+          "按厂家频温/降感条件初筛；不模拟 L(I)。");
+      }
+      add("inductor_magnetic_coverage", "成品电感磁芯/交流损耗与温升",
+        null, null, "<=", "", "undefined", d.note);
+      continue;
+    }
     add("B_sat" + suffix, title + "峰值磁密", d.B_pk, p.Bsat, "<", "T");
     add(
       "temp_rise" + suffix,

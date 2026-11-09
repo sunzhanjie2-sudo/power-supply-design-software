@@ -21,9 +21,9 @@ QR_SETTINGS = {
 COMMON = {'blanking_ns','min_on_ns','delay_ns','driver_resistance','soft_start_ms',
     'stop_ms','step_ms','load_after','feedback_scale','cs_filter_ns','kp','fz1','fp1','fz2','fp2',
     'include_cap_esl','diode_cj_pf','short_test','short_output','short_start_ms','short_duration_ms',
-    'short_resistance','simulation_timeout_s','simulation_threads','comparison_tolerance_pct',
+    'short_resistance','simulation_timeout_s','simulation_threads','simulation_reuse','comparison_tolerance_pct',
     'cycle_tolerance_pct','fra_enabled','fra_start_hz','fra_stop_hz','fra_oct','fra_amplitude_pct',
-    'fra_cycles','fra_timeout_s'}
+    'fra_cycles','fra_timeout_s','cross_enabled','cross_mode','cross_hold_ms','cross_timeout_s'}
 
 
 def applicable_keys(topology):

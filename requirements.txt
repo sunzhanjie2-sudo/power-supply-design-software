@@ -6,3 +6,7 @@ control==0.10.2
 matplotlib==3.10.5
 python-docx==1.2.0
 openpyxl==3.1.5
+jsonschema==4.25.0
+# Integrated transformer CAD/mesh worker; Elmer remains a user-installed solver.
+gmsh==4.15.2
+meshio==5.3.5

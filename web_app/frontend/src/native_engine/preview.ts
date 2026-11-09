@@ -24,6 +24,12 @@ export function preview(p: Spec) {
       { ref: "Q1", kind: "mos", role: "主 MOSFET" },
       { ref: "R_S1", kind: "resistor", role: "主开关电流采样电阻" },
     ];
+  if (p.feedback_mode !== "PSR-MP6005" && p.component_management?.items?.U_CTRL)
+    rows.push({
+      ref: "U_CTRL",
+      kind: "controller",
+      role: "控制器型号参考（通用行为模型；未展开引脚/驱动/偏置）",
+    });
   if (isolated(p))
     rows.push({ ref: "T1", kind: "transformer", role: "隔离变压器" });
   else rows.push({ ref: "L1", kind: "inductor", role: "储能电感" });

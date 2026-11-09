@@ -60,6 +60,7 @@ SETTINGS = {
     'short_resistance': (.01, .001, 10., '短路等效电阻', 'Ω'),
     'simulation_timeout_s': (180., 10., 1800., '每工况仿真超时', 's'),
     'simulation_threads': (2.,1.,8.,'LTspice 最大线程数',''),
+    'simulation_reuse': (1.,0.,1.,'复用相同设计已通过的标称仿真',''),
     'comparison_tolerance_pct': (5., .1, 100., '对比偏差提示阈值', '%'),
     'cycle_tolerance_pct': (5.,1.,30.,'逐周期重复性阈值','%'),
     'fra_enabled': (1.,0.,1.,'实际开关闭环 FRA 对比',''),
@@ -90,6 +91,7 @@ CHOICES = {
     'olp_enabled': {0:'关闭',1:'开启'}, 'short_test': {0:'关闭',1:'开启'},
     'include_cap_esl': {0:'快速验证 不含 ESL',1:'详细模型 包含 ESL'},
     'slope_mode': {0:'跟随设计计算值',1:'自动工程建议值（非芯片实测）',2:'手动设置，0 表示禁用'},
+    'simulation_reuse': {0:'每次重新运行',1:'复用已通过结果（配置变化自动重跑）'},
     'fra_enabled': {0:'关闭',1:'开启'},'cross_enabled': {0:'关闭',1:'开启'},
     'cross_mode': {0:'三路以内全组合，更多路采用重点角点',1:'所有 min/max 负载组合（耗时较长）'},
 }
@@ -116,7 +118,7 @@ def setting_group(key):
     if key in ('frequency_hz','duty_max','blanking_ns','min_on_ns','delay_ns','driver_resistance','uvlo','cs_limit','slope_mode','slope','cs_filter_ns'):return '频率与 PWM'
     if key in ('soft_start_mode','soft_start_ms','soft_start_current_fraction','comp_offset_v','ss_comp_start_v','ss_comp_end_v','enable_delay_ms'):return '软启动逻辑'
     if key in ('short_mode','scp_threshold_v','scp_blanking_ns','olp_enabled','olp_ms','ocp_hold_us','hiccup_off_ms'):return '短路与过载保护'
-    if key in ('stop_ms','step_ms','load_after','short_test','short_output','short_start_ms','short_duration_ms','short_resistance','simulation_timeout_s','simulation_threads','comparison_tolerance_pct'):return '测试与对比报告'
+    if key in ('stop_ms','step_ms','load_after','short_test','short_output','short_start_ms','short_duration_ms','short_resistance','simulation_timeout_s','simulation_threads','simulation_reuse','comparison_tolerance_pct'):return '测试与对比报告'
     if key.startswith(('fra_','cross_')) or key=='cycle_tolerance_pct':return '环路与交叉调整率'
     return '补偿与寄生'
 
@@ -223,10 +225,10 @@ def project_files(parameters, *, bundle=None):
         notes.append('计算器已启用正激物理周期模型：同一 kij、几何 DCR、钳位与输出电感，不重复叠加预设效率。理想门极边沿、恒定寄生和刚性电容端等差异仍保留。')
     notes.append('电容 ESR 保留；'+('包含用户电容 ESL，采用串联寄生电容模型。' if settings['include_cap_esl'] else
         '当前为闭环快速验证设置，未包含电容 ESL；高频应力/纹波尖峰不宜据此签核。'))
-    if q.get('coupling_config', {}).get('enabled'):
+    if q.get('coupling_config', {}).get('enabled') or q.get('coupling_config', {}).get('field_matrix_enabled'):
         matrix = resolve_winding_model(q, rails, geometry=geometry, nominal_op=op)
         kvals = matrix['K'].tolist()
-        coupling_source = 'user-pairwise-kij'
+        coupling_source = 'field-self-and-pairwise-kij' if matrix['self_inductances_H'] is not None else 'user-pairwise-kij'
     else:
         legacy_k = float(q.get('K', .99))
         if not 0 < legacy_k <= 1:
@@ -336,6 +338,10 @@ def project_files(parameters, *, bundle=None):
         '.meas tran primary_rms RMS I(LP) FROM {TLOAD-200/FSW} TO {TLOAD-10/FSW}',
         '.meas tran primary_avg AVG I(LP) FROM {TLOAD-200/FSW} TO {TLOAD-10/FSW}',
         '.meas tran vcs_peak MAX V(sense) FROM {TLOAD-200/FSW} TO {TLOAD-10/FSW}']
+    if q['topology'] == 'FLYBACK':
+        # Only the fixed-frequency flyback controller contains GPROTECT.
+        # The QR adapter shares this power stage but has different internal nodes.
+        analysis.append('.save V(xu_ctrl:cs_filtered) V(xu_ctrl:xsuper:scp) V(xu_ctrl:olpt)')
     for i in range(1,len(rails)+1):
         analysis += [f'.save V(out{i}) V(cap{i}) V(rect{i}) V(sgnd) I(LS{i})',
             f'.meas tran out{i}_before AVG V(out{i},sgnd) FROM {{TLOAD-200/FSW}} TO {{TLOAD-10/FSW}}',
@@ -369,7 +375,9 @@ def project_files(parameters, *, bundle=None):
         settings=settings, resolved_controller=values, hardware=geometry,
         voltage_nodes=dict(output='after-output-blocking-diode',feedback='capacitor-before-output-blocking-diode',
             feedback_reference=values['VSET']/values['FB_SCALE'],port_target=rails[selected-1]['V_out']),
-        coupling=dict(source=coupling_source,k=kvals), slope=dict(design=design_slope,recommended=recommended,resolved=slope),approximation_notes=notes)
+        coupling=dict(source=coupling_source,k=kvals,port_order=['P']+[f'OUT{i}' for i in range(1,len(rails)+1)],
+            self_inductances_H=[power_parameters['LP']]+[power_parameters[f'LS{i}'] for i in range(1,len(rails)+1)]),
+        slope=dict(design=design_slope,recommended=recommended,resolved=slope),approximation_notes=notes)
     readme = ('# 反激闭环 LTspice 工程\n\n'
         '解压到普通文件夹，在 LTspice 打开 `Flyback.asc` 或 `Flyback.cir`，点击 Run。无需安装 MCP 或 Python。\n'
         'ASC 原生展示输入、RCD、主 MOS、变压器各绕组、整流、电容、负载及闭环控制器，支持直接查看连线和器件。\n'

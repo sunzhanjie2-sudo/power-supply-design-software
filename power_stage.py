@@ -68,11 +68,13 @@ DEFAULT_PARAMS = {
     'ma_slope': 0.0,                # slope compensation, A/s (primary L)
 
     # --- magnetics --------------------------------------------------------
-    'core_material': 'N87', 'k_core': 52.0, 'a_core': 1.25, 'b_core': 2.35,
+    'core_material': 'DMR44', 'k_core': 27.49, 'a_core': 1.456, 'b_core': 2.246,
+    'mu_r': 0., 'le_core': 0.,     # le_core is accepted for old files; le always derives from Ve/Ae
     'MLT': 0.0,                            # mean length per turn (m, 0 = auto)
     'Np': 0, 'Ns': 0,                       # transformer turns (0 = auto)
     'd_wire_p': 0.0, 'd_wire_s': 0.0,        # winding wire dia (m, 0 = auto)
     'n_strand_p': 1, 'n_strand_s': 1,        # parallel strands (并绕数)
+    'parallel_wires_p': 1, 'parallel_wires_s': 1,  # complete identical wires in parallel
     'Bmax': 0.30, 'J': 4.0e6, 'Ku': 0.30, 'rho': 1.72e-8,
     'Bsat': 0.40,                  # saturation flux density (saturation check)
     'h_conv': 10.0,                # thermal convection coefficient W/(m^2 K)
@@ -104,10 +106,20 @@ DEFAULT_PARAMS = {
 # Keep the built-in table above as the schema/fallback for absent optional keys.
 from config_io import read_default_config, decode_config
 DEFAULT_PARAMS.update(decode_config(read_default_config()))
+# The startup example is explicitly loaded by the UI. Its device identity,
+# curve-source policy and explicit capacitor lists must not become defaults
+# for unrelated legacy files that use scalar caps or pre-hub curve modes.
+DEFAULT_PARAMS.update(component_management={}, device_curve_settings={},
+                      mos_miller_curve={}, mos_charge_curve={}, diode_curves={},
+                      mos_manual_events={}, mos_miller_mode='auto', mos_charge_mode='manual',
+                      input_capacitors=None, output_capacitors=None)
+from inductor_selection import DEFAULTS as INDUCTOR_DEFAULTS
+DEFAULT_PARAMS.update(INDUCTOR_DEFAULTS)
 from mp6005 import DEFAULTS as PSR_DEFAULTS
 DEFAULT_PARAMS.update(PSR_DEFAULTS)
 DEFAULT_PARAMS.update(outputs=[],feedback_mode='SSR',feedback_output=1,
                       coupling_config=dict(enabled=False, k=[], dcr=[]))
+DEFAULT_PARAMS['engineering_acceptance'] = {}
 
 
 # ----------------------------------------------------------------------------
@@ -115,8 +127,15 @@ DEFAULT_PARAMS.update(outputs=[],feedback_mode='SSR',feedback_output=1,
 # ----------------------------------------------------------------------------
 def validate_design_inputs(p):
     """Reject invalid numerical inputs consistently before making a snapshot."""
+    from inductor_selection import validate as validate_inductor, purchased, DESIGN_FIELDS
+    validate_inductor(p)
     from custom_cores import validate_selected_cores
     validate_selected_cores(p)
+    if p['topology'] in (TOPO_FLYBACK, TOPO_QRFLYBACK, TOPO_ACFFORWARD):
+        from transformer_gap import validate_inputs
+        validate_inputs(p)
+        from parallel_wires import count
+        count(p,'p');count(p,'s')
     from parasitics import normalize
     normalize(p.get('parasitic_config'))
     if 'V_in_min' in p or 'V_in_max' in p:
@@ -133,8 +152,10 @@ def validate_design_inputs(p):
             raise ValueError(f'{key} must be finite')
     positive = ['V_in','V_out','P_out','f_sw','L','C_out','Cin1','Vm','A_sense',
                 'Bmax','Bsat','J','Ku']
+    if purchased(p):
+        positive = [key for key in positive if key not in DESIGN_FIELDS]
     positive += ['Rth_transformer'] if p['topology'] in (TOPO_FLYBACK, TOPO_QRFLYBACK, TOPO_ACFFORWARD) else []
-    if p['topology'] not in (TOPO_FLYBACK, TOPO_QRFLYBACK):
+    if p['topology'] not in (TOPO_FLYBACK, TOPO_QRFLYBACK) and not purchased(p):
         positive += ['h_conv']
     if p.get('cout2_enable'): positive.append('C_out2')
     if p.get('cin2_enable'): positive.append('Cin2')
@@ -215,7 +236,11 @@ def _compute_operating_point(p):
         from coupled_flyback import solve_coupled_flyback
         from flyback_clamp import attach_clamp
         nominal = dict(p, coupling_config=dict(enabled=False))
-        solved = solve_coupled_flyback(p, compute_operating_point(nominal))
+        if p['topology']==TOPO_QRFLYBACK:
+            from qr_coupled import solve_coupled_qr
+            solved = solve_coupled_qr(p, compute_operating_point(nominal))
+        else:
+            solved = solve_coupled_flyback(p, compute_operating_point(nominal))
         clamp_params = dict(p,K=1.) if solved.get('coupled_model',{}).get('ideal_fallback') else p
         return attach_clamp(solved, clamp_params)
     from isolated_outputs import output_specs, compute_isolated_op

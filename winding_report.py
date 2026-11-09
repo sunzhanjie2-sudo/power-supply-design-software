@@ -50,7 +50,7 @@ def add_winding_snapshot(doc,parameters,result):
         kind='旧矩形束' if legacy else ('利兹线' if r['wire_type']=='litz' else '圆铜线')
         actual=bool(cfg['overrides'].get(r['id'],{}).get('bundle_diameter',0))
         diameter='—（旧方案）' if legacy else f"{r['bundle_diameter']*1e3:.4g}\n"+('指定外径' if actual else f"估算 k={r['packing_factor']:.4g}" if r['strands_per_bundle']>1 else '单股含漆外径')
-        wire_rows.append((r['id'],f"{int(r['turns'])} × {int(r['strands'])}",
+        wire_rows.append((r['id'],f"{int(r['turns'])} × {int(r['strands'])} × {int(r.get('parallel_wires',1))}",
             f"{kind}\n{r['parallel_bundles']} × {r['strands_per_bundle']}",
             f"{r['bare_diameter']*1e3:.4g} / {r['outer_diameter']*1e3:.4g}",
             diameter,f"{r['flatten_ratio']:.4g}",
@@ -64,7 +64,7 @@ def add_winding_snapshot(doc,parameters,result):
             layout_rows.append((r['id'],styles[r['winding_style']],
                 f"{r['turns_per_layer']} / {r['capacity']}",str(r['layers']),
                 f"{r['turn_width']*1e3:.4g}",f"{r['buildup']*1e3:.4g}"))
-    table(doc,['绕组','匝数 ×\n电气股数','线材\n束数 × 股/束','单股裸径 /\n含漆外径 mm',
+    table(doc,['绕组','匝数 × 股/根\n× 并绕根数','线材\n总束数 × 股/束','单股裸径 /\n含漆外径 mm',
                '整束原外径 mm\n来源 / 填充系数','压扁\n倍数','单束宽 × 高\nmm'],
           wire_rows,[.55,.8,1.15,1.35,1.25,.6,1.4])
     if manual:
@@ -86,7 +86,19 @@ def add_winding_snapshot(doc,parameters,result):
     else:
         table(doc,['绕组','绕法','每层匝数 /\n窗口容量','层数','每匝总宽\nmm','径向叠厚\nmm'],
               layout_rows,[.55,1.25,1.5,.6,1.6,1.6])
-    paragraph(doc,'电气总股数 = 并绕束数 × 每束股数，分束不重复增加铜截面积。例如 3 束 × 20 股要求电气总股数为 60。单股铜线保持圆形；利兹线默认按宽 ×1.5、高 ÷1.5 的等截面积假设压扁，填充系数默认 0.75 为可编辑假设，优先采用实测整束原外径。压扁后束高若小于单股含漆线径则拒绝配置；外径面积下界只属必要条件，不保证真实堆积可行。疏绕仅均匀分布各匝完整束组，密绕在所选一侧排列；每层匝数不超过窗口容量。',True)
+    paragraph(doc,'单根线股数 × 线圈并绕根数 = 每匝总铜股数；并绕 2 根相同线绕 6 匝仍是 6 匝，截面为 12 根线。每根线内分束仅重新组合其原有股数，不增加铜面积，例如并绕根数为 1 时，3 束 × 20 股要求电气总股数为 60。单股铜线保持圆形；利兹线默认按宽 ×1.5、高 ÷1.5 的等截面积假设压扁，填充系数默认 0.75 为可编辑假设，优先采用实测整束原外径。压扁后束高若小于单股含漆线径则拒绝配置；外径面积下界只属必要条件，不保证真实堆积可行。疏绕可一键均匀生成，逐匝位置可再手调；每层匝数不超过窗口容量。',True)
+    positions=cfg.get('turn_positions',{})
+    if any(positions.values()):
+        by_id={s['id']:s for s in assessment.get('cross_sections',[])}
+        moved=[]
+        for sid,entries in positions.items():
+            for key,center in entries.items():
+                point=by_id.get(sid+':'+key)
+                moved.append((sid,key,f'{center*1e3:.6g}',
+                    f"{(point['y']+point['height']/2)*1e3:.6g}" if point else '已失效',
+                    '待修正' if not point or point.get('conflict') else '已应用'))
+        table(doc,['物理段','本层匝号 : 束号','中心 X / mm','中心 Y / mm','位置状态'],moved,[1.,1.6,1.4,1.4,1.7])
+        paragraph(doc,'逐匝位置只覆盖轴向中心 X，径向 Y 由所属物理层决定。报告截面与建模导出采用同一坐标；红色位置及已失效记录须修正。',True)
     figure(doc,_chart((7.1,3.9),lambda fig:draw_winding_cross_section(fig.subplots(),assessment)),
            '图 5-3  指定层绕方案的等比例截面；圆 / 椭圆为整束等效外轮廓，不逐根绘制束内铜丝')
     paragraph(doc,f"裸铜面积 / 净窗口面积为 {assessment['copper_fill']*100:.1f}%。当前方案的宽度或叠高超限即不能按此排布放下；低面积占比也可能绕不下，不代表其他绕法均不可行。",True)
@@ -103,7 +115,7 @@ def add_winding_reference(doc):
     paragraph(doc,'原边 P、OUT1–OUT6 与 MP6005 的 AUX 从磁件计算结果读取已解析的匝数、裸铜直径及电气总股数 n，不使用输入中 0=自动 的占位值。单股含漆外径为 0 时采用裸径加全局增量，也可逐绕组指定实测值。默认余量只是可编辑初值，不是材料或绝缘等级推荐。')
     equation(doc,'d_o = d_c + Δd')
     equation(doc,'W_u = W−2m_x；H_u = H−2m_y')
-    paragraph(doc,'每匝由 B 束并绕线组成，B 必须整除电气总股数；每束含 n_b 股。例如 3 束 × 20 股必须在电气绕组中设置总股数 60，而不是把已有 60 股再乘 3。每束只画一个等效圆或椭圆，不逐根画微细铜丝；同匝的 B 束保持为完整组，不跨层拆分。')
+    paragraph(doc,'线圈并绕数 b 是相同完整导线的根数，缺省 1；nstrand 是每根线股数，每匝总铜股数 n=b·nstrand。6 匝、b=2 时截面为 12 根整线，电气仍为 6 匝。每根线内分束数只重新分组，须整除 nstrand；总束数 B=b×分束数。b=1 时 3 束×20 股对应总股数 60，不重复增加铜。每束画一个等效截面，同匝完整束组不跨层拆分。')
     equation(doc,'n_b = n/B')
     paragraph(doc,'每束多股线的未压扁等效外径 D_b 按下式估算；k_pack 为束内含漆单线面积占比，默认 0.75 只是可编辑的几何假设，不是厂商通用值。指定实测整束原外径时直接采用该值，不再用填充系数推算。每束只有一股时直接取 D_b=d_o，不额外放大。')
     equation(doc,'D_b = d_o·√(n_b/k_pack)')
@@ -134,6 +146,7 @@ def add_winding_reference(doc):
     equation(doc,'x_0 = m_x；x_0 = m_x+W_u−w_occ')
     paragraph(doc,'图的横纵轴使用同一毫米比例，圆 / 椭圆表示整束等效外轮廓，不将包络内部涂成实心裸铜。骨架挡墙仅画在输入净窗口以外，尺寸为示意而非实际壁厚；超限部分保留并标红。等效束截面超过 12000 个或总物理层数超过 256 时简化绘图：手动保留逐层带状顺序，自动显示绕组整体包络，不画单束椭圆。数值判断仍覆盖全部匝数、层数与电气总股数。')
     paragraph(doc,'兼容旧配置：若某绕组仅保存显式非零 strand_columns、没有新的线束字段，则沿用旧矩形束宽高；界面与报告明确标为旧方案，不偷偷改变旧评估。切换新模型需清除旧列数；新字段不能与非零旧列数混用。旧方案不再逐根绘制束内铜丝，仅显示每匝矩形轮廓。')
+    paragraph(doc,'点选某匝中的线束可左右拖动，或用方向键按设定步长移动（Shift×10、Alt÷10、Ctrl+Z 撤销）。一键均匀排布保留交错层序，之后可微调。首次移动固定物理段 ID；turn_positions 按本层匝号:束号保存米制轴向中心 X，Y 由层序决定。重叠、净隙不足、越界或旧位置失效均提示。位置编辑不触发电气求解，报告与建模导出复用坐标。')
     paragraph(doc,'适用边界：不含引线与跨线的走线、绕组分段的端部连接、绞线膨胀、骨架圆角、槽内实际形变、工艺公差与安规认证。绝缘按用户输入的厚度占位，不自动执行爬电、电气间隙或耐压合规校核。更改几何排布不会回写铜损、DCR、漏感或耦合矩阵；需要用户按工艺或实测另行更新电气参数。')
     doc.add_heading('17.4  手动物理层序与交错绕制',2)
     paragraph(doc,'勾选手动物理层序后，每一行对应一层，按骨架向外编号；同一电气绕组可以分配到第 1、3 等不连续层。例如 P 的 6 匝可拆成第 1 层 3 匝、第 3 层 3 匝，中间穿插 OUT1。这里仍是一个 6 匝电气绕组，不能把每层当成新增绕组或重复计算铜面积。可新增、删除、拆层及上下移动，并从自动排层重新生成草案。')
@@ -146,8 +159,8 @@ def add_winding_reference(doc):
     paragraph(doc,'y_ℓ 为物理层下沿位置，递推式用于第 2 层起。总叠高按每个物理层及其前置绝缘各计一次，不再用“不同绕组数量减一”替代实际界面数。高度余量仍为 ΔH=H−H_req。绕组汇总分别给出其实际物理层号、本绕组占厚及首末层跨高；后者包括穿插的其它线层，不可相加作为总高。')
     paragraph(doc,'交错层序只控制几何排布，不生成跨线、端部引线或电气连接图；仍须确认同一绕组各段串联方向、绝缘工艺与实际可绕制性。它不会自动降低漏感、修改两两 kij / DCR、重算铜损或保证耦合改善；这些电气量仍需实测或独立场仿真确认。')
     doc.add_heading('17.5  保存、报告与后台计算',2)
-    paragraph(doc,'配置 JSON 的 winding_config 保存 SI 长度、绕组顺序和逐绕组线材类型、并绕束数、整束外径、填充系数、压扁倍数、绕法与每层匝数；layer_plan 非空时保存完整手动物理层序，空列表表示自动。关闭手动模式保留当前界面的草案，但保存的有效配置仍为空层序；需要保存草案应重新启用手动模式。旧配置缺失时保持窗口未配置，不猜测尺寸。填写有效窗口后，Word 报告同步包含输入、线材及排布表格、判断和同一截面图；手动模式另附逐物理层表，未填写不输出虚假的绕制结论。')
-    paragraph(doc,'耗时电气计算改为一个后台工作线程。编辑后先使旧快照失效，合并连续输入，只保留最新待算任务；过期结果不写回界面，长求解在残差与负载点间检查取消。相同参数保留有限缓存，修改窗口尺寸只重画局部几何，不触发耦合求解。效率曲线与参数扫描也排入该工作线程，避免同时挤占 CPU。')
-    paragraph(doc,'Tk 控件与绘图发布留在主线程，后台仅返回数值快照。窗口缩放只更新布局，不重新求解设计；取消不阻塞等待数值库退出。后台化主要改善响应，不承诺所有多路非线性求解时长变短，个别图形发布仍有短暂开销。')
+    paragraph(doc,'配置 JSON 的 winding_config 保存 SI 窗口尺寸、绕组顺序、线材外形、分束、压扁与绕法；layer_plan 保存物理层序，空列表表示自动，turn_positions 保存逐匝轴向中心。电气并绕数使用 parallel_wires_p/s，各路输出独立保存 parallel_wires_s，旧工程缺省 1。关闭手动模式时有效层序为空，草案仅留在界面；要保存需重新启用。Word 报告包含线材与排布表、手调位置和同一截面图；未配置窗口时不输出绕制结论。')
+    paragraph(doc,'耗时电气计算在后台运行，合并连续输入，只保留最新任务；过期及取消结果不发布，缓存有界。窗口尺寸和逐匝位置仅刷新局部几何，不启动耦合求解。效率曲线与扫描共用后台队列，避免抢占 CPU。')
+    paragraph(doc,'Tk 控件与绘图留在主线程，后台只返回数值快照；缩放不重算，取消不阻塞。后台化改善响应，不保证求解更快，图形发布仍有开销。')
     paragraph(doc,'结构参考：Texas Instruments SLUP125，Magnetics Design 3 – Windings，讨论骨架、圆线空隙、绝缘及端接对窗口使用的影响；这里采用上述明确的等效束几何算法，并非复现某一厂商完整绕制工具。1.5 与 0.75 均为可配置几何假设，不是该文献给出的通用材料常数。')
     paragraph(doc,'https://www.ti.com/lit/ml/slup125/slup125.pdf',True)

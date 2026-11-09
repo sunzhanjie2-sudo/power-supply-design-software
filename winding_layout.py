@@ -6,11 +6,12 @@ copper area, DCR, losses, or the coupling matrix.
 """
 import copy
 import math
+import re
 
 
 DEFAULT_WINDING_CONFIG = dict(window_width=0., window_height=0., margin_x=.25e-3,
     margin_y=.10e-3, diameter_allowance=.03e-3, layer_insulation=.05e-3,
-    interwinding_insulation=.15e-3, wire_gap=0., order=[], overrides={},layer_plan=[])
+    interwinding_insulation=.15e-3, wire_gap=0., order=[], overrides={},layer_plan=[],turn_positions={})
 
 MAX_MANUAL_LAYERS=1000
 MAX_MATERIALIZED_LAYERS=12000
@@ -21,6 +22,36 @@ DEFAULT_WIRE_OVERRIDE = dict(outer_diameter=0., strand_columns=0,
     bundle_diameter=0., flatten_ratio=1.5, winding_style='sparse',
     turns_per_layer=0)
 _NEW_WIRE_KEYS=set(DEFAULT_WIRE_OVERRIDE)-{'outer_diameter','strand_columns'}
+
+def section_suffix(index):
+    """Zero-based alphabetic suffix; remains readable beyond 26 sections."""
+    name=''
+    while index>=0:
+        name=chr(65+index%26)+name
+        index=index//26-1
+    return name
+
+
+def identify_layers(plan):
+    """Upgrade legacy rows once; allocate new IDs without renumbering existing ones."""
+    used=set()
+    for row in plan:
+        if 'section_id' not in row: continue
+        key=row['section_id']
+        if not isinstance(key,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,79}',key) or key in used:
+            raise ValueError('物理段 ID 必须唯一，使用英文字母、数字、下划线或短横线')
+        used.add(key)
+    counters={}
+    for row in plan:
+        if 'section_id' in row: continue
+        winding=row['winding_id']
+        index=counters.get(winding,0)
+        while (key:=f'{winding}_{section_suffix(index)}') in used:
+            index+=1
+        row['section_id']=key
+        used.add(key)
+        counters[winding]=index+1
+    return plan
 
 
 def _finite_number(value, label, *, minimum=0., maximum=None, integer=False):
@@ -37,12 +68,17 @@ def validate_winding_config(raw=None):
         raw = {}
     if not isinstance(raw,dict):
         raise ValueError('winding_config 必须是参数字典')
-    unknown=set(raw)-set(DEFAULT_WINDING_CONFIG)
+    unknown=set(raw)-set(DEFAULT_WINDING_CONFIG)-{'model_3d'}
     if unknown:
         raise ValueError('未知绕制参数：'+', '.join(sorted(unknown)))
     cfg=copy.deepcopy(DEFAULT_WINDING_CONFIG)
     cfg.update(copy.deepcopy(raw))
-    for key in set(cfg)-{'order','overrides','layer_plan'}:
+    if 'model_3d' in cfg:
+        from transformer_geometry_contract import validate_profile
+        validate_profile(cfg['model_3d'])
+    from winding_positions import validate as validate_positions
+    cfg['turn_positions']=validate_positions(cfg['turn_positions'])
+    for key in set(cfg)-{'order','overrides','layer_plan','model_3d','turn_positions'}:
         value=cfg[key]
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or value<0:
             raise ValueError(key+' 必须为有限非负长度（SI：m）')
@@ -54,7 +90,7 @@ def validate_winding_config(raw=None):
     if not isinstance(cfg['layer_plan'],list) or len(cfg['layer_plan'])>MAX_MANUAL_LAYERS:
         raise ValueError(f'手动逐层排布必须是列表，最多 {MAX_MANUAL_LAYERS} 层')
     for index,entry in enumerate(cfg['layer_plan'],1):
-        if (not isinstance(entry,dict) or set(entry)-{'winding_id','turns','winding_style'} or
+        if (not isinstance(entry,dict) or set(entry)-{'winding_id','turns','winding_style','section_id'} or
             not {'winding_id','turns'}<=set(entry)):
             raise ValueError(f'第 {index} 层必须指定 winding_id、turns，可选 winding_style')
         if not isinstance(entry['winding_id'],str) or not entry['winding_id'].strip():
@@ -62,6 +98,7 @@ def validate_winding_config(raw=None):
         entry['turns']=_finite_number(entry['turns'],f'第 {index} 层匝数',minimum=1,maximum=10000000,integer=True)
         if entry.get('winding_style','sparse') not in ('sparse','dense_left','dense_right'):
             raise ValueError(f'第 {index} 层绕法无效')
+    identify_layers(cfg['layer_plan'])
     if not isinstance(cfg['overrides'],dict):
         raise ValueError('逐绕组设置必须为参数字典')
     for key,entry in cfg['overrides'].items():
@@ -92,12 +129,12 @@ def transformer_windings(result):
     tr=(result.get('mag') or {}).get('transformer') or {}
     if not tr.get('ok'):
         return []
-    rows=[dict(id='P',name='原边 P',turns=tr['Np'],strands=tr['n_strand_p'],bare_diameter=tr['d_wire_p'])]
+    rows=[dict(id='P',name='原边 P',turns=tr['Np'],strands=tr['n_strand_p'],parallel_wires=tr.get('parallel_wires_p',1),bare_diameter=tr['d_wire_p'])]
     if tr.get('windings'):
         rows += [dict(id=f"OUT{w['id']}",name=f"OUT{w['id']} · {w['name']}",
-                      turns=w['Ns'],strands=w['n_strand_s'],bare_diameter=w['d_wire_s']) for w in tr['windings']]
+                      turns=w['Ns'],strands=w['n_strand_s'],parallel_wires=w.get('parallel_wires_s',1),bare_diameter=w['d_wire_s']) for w in tr['windings']]
     else:
-        rows.append(dict(id='OUT1',name='副边 OUT1',turns=tr['Ns'],strands=tr['n_strand_s'],bare_diameter=tr['d_wire_s']))
+        rows.append(dict(id='OUT1',name='副边 OUT1',turns=tr['Ns'],strands=tr['n_strand_s'],parallel_wires=tr.get('parallel_wires_s',1),bare_diameter=tr['d_wire_s']))
     if tr.get('auxiliary'):
         aux=tr['auxiliary']
         rows.append(dict(id='AUX',name='PSR 辅助绕组',turns=aux['Na'],strands=1,bare_diameter=aux['d_wire']))
@@ -130,6 +167,8 @@ def assess_winding_window(windings, config=None):
     for index,key in enumerate(order):
         source=by_id[key]
         turns,strands=source['turns'],source['strands']
+        from parallel_wires import count
+        copies=count({'parallel_wires_s':source.get('parallel_wires',1)},'s')
         bare=float(source['bare_diameter'])
         for val,label in ((turns,'匝数'),(strands,'并绕股数')):
             if isinstance(val,bool) or not isinstance(val,(int,float)) or not math.isfinite(val) or int(val)!=val or not 1<=val<=10000000:
@@ -172,6 +211,8 @@ def assess_winding_window(windings, config=None):
             bundle_height=diameter/ratio
             if bundle_height+1e-15<outer:
                 raise ValueError(key+' 压扁后的束高小于单股含漆线径；请降低压扁倍数或确认整束外径')
+        bundles_per_wire=bundles
+        bundles*=copies
         turn_width=bundles*bundle_width+(bundles-1)*gap
         capacity=max(0,int(math.floor((usable_width+gap)/(turn_width+gap)+1e-10)))
         horizontal_ok &= capacity>0
@@ -194,6 +235,7 @@ def assess_winding_window(windings, config=None):
         row=dict(source,outer_diameter=outer,strand_columns=cols,strand_rows=rows,
                  layout_model='legacy_rectangular' if legacy else 'equivalent',
                  wire_type=kind,parallel_bundles=bundles,strands_per_bundle=per_bundle,
+                 parallel_wires=copies,bundles_per_wire=bundles_per_wire,total_strands=int(strands*copies),
                  packing_factor=wire['packing_factor'],bundle_diameter=diameter,
                  flatten_ratio=ratio,winding_style=style,capacity=capacity,
                  turns_per_layer=per_layer,layers=layers,bundle_width=bundle_width,
@@ -201,11 +243,11 @@ def assess_winding_window(windings, config=None):
                  top=top,buildup=buildup,width=span,turn_width=turn_width,
                  occupied_width=occupied,cluster_x=start_x,
                  horizontal_fit=capacity>0,vertical_fit=top<=height-cfg['margin_y']+1e-14,
-                 conductor_count=int(turns*strands),bundle_count=int(turns*bundles),
+                 conductor_count=int(turns*strands*copies),bundle_count=int(turns*bundles),
                  stack_span=buildup,layer_layout=None,physical_layer_indices=None,layer_turns=None)
         base['windings'].append(row)
-        copper_area+=turns*strands*math.pi*bare**2/4
-        outer_area+=turns*strands*math.pi*outer**2/4
+        copper_area+=turns*strands*copies*math.pi*bare**2/4
+        outer_area+=turns*strands*copies*math.pi*outer**2/4
         cursor=top
     # Resolve physical layers only after all logical-wire geometries are known.
     # Electrical turns/strands and area above are counted once per winding,
@@ -234,6 +276,7 @@ def assess_winding_window(windings, config=None):
             cursor+=tape
             layer=_physical_layer(row,index,entry['turns'],cursor,tape,kind,
                 entry.get('winding_style',row['winding_style']),cfg)
+            layer['section_id']=entry['section_id']
             physical.append(layer);cursor=layer['top'];previous=key
         for key,row in rows_by_id.items():
             entries=[layer for layer in physical if layer['winding_id']==key]
@@ -264,7 +307,7 @@ def assess_winding_window(windings, config=None):
                     layer=_physical_layer(row,len(physical)+1,n,y,tape,kind,row['winding_style'],cfg)
                     physical.append(layer);entries.append(layer)
                 _assign_layer_metadata(row,entries)
-            base['physical_layers']=physical
+            base['physical_layers']=identify_layers(physical)
         else:
             base['physical_layers']=None
     required=cursor+cfg['margin_y']
@@ -281,6 +324,8 @@ def assess_winding_window(windings, config=None):
     if any(r['layout_model']=='legacy_rectangular' for r in base['windings']):
         base['warnings'].append('包含旧配置的显式矩形束列数，沿用其宽高；切换等效线束前请清除旧列数。')
     base['warnings'].append('利兹线压扁按截面积不变估算；默认填充系数与压扁比例不是实测值。仅作分层几何预评估，不含引线、跨线、公差和安规认证，不回写 DCR、漏感或 kij。')
+    from winding_positions import prepare
+    prepare(base)
     return base
 
 
@@ -312,6 +357,7 @@ def build_automatic_layer_plan(windings,config=None):
     """Generate an editable, conserved physical plan without unbounded lists."""
     cfg=validate_winding_config(config)
     cfg['layer_plan']=[]
+    cfg['turn_positions']={}
     assessment=assess_winding_window(windings,cfg)
     if not assessment['configured'] or not assessment['windings']:
         raise ValueError('请先填写有效净窗口并完成变压器计算，再生成逐层排布')
@@ -319,11 +365,11 @@ def build_automatic_layer_plan(windings,config=None):
         raise ValueError(f'自动方案超过 {MAX_MANUAL_LAYERS} 层，不能转为手动逐层编辑；请先修正窗口和线材')
     if any(not row['horizontal_fit'] for row in assessment['windings']):
         raise ValueError('完整匝束超出窗口宽度，不能生成有效逐层排布')
-    return [dict(winding_id=e['winding_id'],turns=e['turns'],winding_style=e['winding_style'])
+    return [dict(section_id=e['section_id'],winding_id=e['winding_id'],turns=e['turns'],winding_style=e['winding_style'])
             for e in assessment['physical_layers']]
 
 
-def iter_bundle_sections(row, config):
+def iter_bundle_records(row, config):
     """Yield equivalent bundle bounding boxes (x, y, w, h), all in metres.
 
     Complete parallel-bundle groups stay together in sparse winding. Only
@@ -335,7 +381,8 @@ def iter_bundle_sections(row, config):
     entries=layout if layout is not None else (
         dict(turns=min(q,count-layer*q),y=row['y']+layer*(row['bundle_height']+config['layer_insulation']),
              winding_style=row['winding_style']) for layer in range(row['layers']))
-    for entry in entries:
+    for index,entry in enumerate(entries):
+        sid=entry.get('section_id',row['id']+'_'+section_suffix(index))
         n=entry['turns']
         occupied=n*row['turn_width']+(n-1)*gap
         start=config['margin_x']; pitch=row['turn_width']+gap
@@ -351,8 +398,19 @@ def iter_bundle_sections(row, config):
         for turn in range(n):
             x=start+turn*pitch
             for bundle in range(row['parallel_bundles']):
-                yield (x+bundle*(row['bundle_width']+gap),y,
-                       row['bundle_width'],row['bundle_height'])
+                key=f'{turn+1}:{bundle+1}'
+                width=row['bundle_width'];height=row['bundle_height']
+                center=config.get('turn_positions',{}).get(sid,{}).get(key)
+                left=x+bundle*(width+gap) if center is None else center-width/2
+                yield dict(id=sid+':'+key,section_id=sid,position_key=key,winding_id=row['id'],
+                           turn=turn+1,bundle=bundle+1,x=left,y=y,width=width,height=height,
+                           profile_type='rectangle' if row['layout_model']=='legacy_rectangular' else 'ellipse',
+                           edited=center is not None)
+
+
+def iter_bundle_sections(row,config):
+    for s in iter_bundle_records(row,config):
+        yield s['x'],s['y'],s['width'],s['height']
 
 
 def draw_winding_cross_section(ax, assessment, max_circles=12000):
@@ -436,16 +494,22 @@ def draw_winding_cross_section(ax, assessment, max_circles=12000):
             ax.add_collection(PatchCollection(tapes,facecolors=tape_colors,edgecolors='none',alpha=.6))
         if overflows:
             ax.add_collection(PatchCollection(overflows,facecolors='none',edgecolors='#c13535',lw=1.4,ls='--'))
+    artists={}
     if detail:
         for row in assessment['windings']:
             color=color_by_id[row['id']]
-            sections=[]
-            for bx,by,bw,bh in iter_bundle_sections(row,cfg):
+            sections=[];ids=[];edgecolors=[]
+            conflicts={s['id'] for s in assessment.get('cross_sections',[]) if s.get('conflict')}
+            for point in iter_bundle_records(row,cfg):
+                bx,by,bw,bh=(point[k] for k in ('x','y','width','height'))
+                ids.append(point['id']);edgecolors.append('#b42318' if point['id'] in conflicts else color)
                 if row['layout_model']=='legacy_rectangular':
                     sections.append(Rectangle((bx*1e3,by*1e3),bw*1e3,bh*1e3))
                 else:
                     sections.append(Ellipse(((bx+bw/2)*1e3,(by+bh/2)*1e3),bw*1e3,bh*1e3))
-            ax.add_collection(PatchCollection(sections,facecolor='white',edgecolor=color,lw=1.1))
+            collection=PatchCollection(sections,facecolor='white',edgecolors=edgecolors,lw=1.1)
+            ax.add_collection(collection)
+            for index,key in enumerate(ids):artists[key]=(collection,index)
     required=assessment['required_height']*1e3
     extent_y=max(height,required)
     padding=max(.3,max(width,extent_y)*.07)
@@ -459,3 +523,4 @@ def draw_winding_cross_section(ax, assessment, max_circles=12000):
     label='当前层绕方案可放下' if assessment['fits'] else '当前层绕方案超限'
     ax.set_title(f'{width:g} × {height:g} mm 净窗口 · {label}'+('（截面过多，仅画层包络）' if not detail else ''),fontsize=10,pad=12)
     ax.legend(handles=handles,loc='upper left',bbox_to_anchor=(1.11,1.),fontsize=7,frameon=False)
+    return artists

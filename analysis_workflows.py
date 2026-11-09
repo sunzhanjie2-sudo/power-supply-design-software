@@ -23,8 +23,10 @@ def pin_hardware(p, res):
         if dev and dev.get('ok'):
             keys = (('core', 'core_geometry', 'MLT', 'MLT_source', 'N', 'd_wire') if kind == 'inductor' else
                     ('core', 'core_geometry', 'MLT', 'MLT_source', 'Np', 'Ns', 'd_wire_p', 'd_wire_s',
-                     'n_strand_p', 'n_strand_s'))
-            fixed['_fixed_'+kind] = copy.deepcopy({k: dev[k] for k in keys})
+                     'n_strand_p', 'n_strand_s', 'parallel_wires_p','parallel_wires_s'))
+            from inductor_selection import hardware
+            fixed['_fixed_'+kind] = copy.deepcopy(hardware(dev) if kind == 'inductor' else
+                {k: dev.get(k,1) if k.startswith('parallel_wires_') else dev[k] for k in keys})
     coupled_hardware = (res['op'].get('coupled_model') or res['op'].get('acf_model') or {}).get('transformer_hardware')
     if coupled_hardware:
         # The numerical circuit used the predesign geometry, including every
@@ -33,13 +35,14 @@ def pin_hardware(p, res):
         fixed['_fixed_transformer'] = copy.deepcopy(coupled_hardware)
     elif md.get('transformer', {}).get('windings'):
         fixed['_fixed_transformer']['windings'] = [
-            {key: winding[key] for key in ('id', 'Ns', 'd_wire_s', 'n_strand_s', 'R_dc')}
+            {key: winding.get(key,1) if key=='parallel_wires_s' else winding[key]
+             for key in ('id', 'Ns', 'd_wire_s', 'n_strand_s', 'parallel_wires_s','R_dc')}
             for winding in md['transformer']['windings']]
     if res.get('outputs'):
         from isolated_outputs import output_specs
         fixed['outputs'] = [{k:v for k,v in r.items() if k!='id'} for r in output_specs(p)]
         for rail,winding in zip(fixed['outputs'],md['transformer']['windings']):
-            for key in ('Ns','d_wire_s','n_strand_s'):
+            for key in ('Ns','d_wire_s','n_strand_s','parallel_wires_s'):
                 rail[key] = winding[key]
         if md.get('inductors'):
             fixed['_fixed_inductors'] = [{k:copy.deepcopy(d[k]) for k in ('core','core_geometry','MLT','MLT_source','N','d_wire')}
@@ -50,6 +53,25 @@ def pin_hardware(p, res):
         auxiliary = md.get('transformer', {}).get('auxiliary')
         if auxiliary:
             fixed['_fixed_auxiliary'] = copy.deepcopy(auxiliary)
+    if (p['topology']=='QR-FLYBACK' and len(p.get('outputs') or [])>1
+            and p.get('coupling_config',{}).get('enabled') and '_qr_rcd_hardware' not in fixed):
+        # Kc sizes one reference RCD. Other inputs/loads must solve the same
+        # resistor/capacitor's mean voltage, not silently resize this hardware.
+        adopted=(res['op'].get('qr_coupled_model') or {}).get('rcd_hardware')
+        if adopted:
+            # Reusing an already solved snapshot must retain its exact R/C,
+            # including when the caller only passes the public specification.
+            fixed['_qr_rcd_hardware']=copy.deepcopy(adopted)
+            fixed['_qr_rcd_hardware'].setdefault('reference_voltage_V',float(p['V_in']))
+        else:
+            from flyback_clamp import rcd_components
+            reference=rcd_components(res['op'],p)
+            resistance,capacitance=reference['R_snub'],reference['C_snub']
+            if (not math.isfinite(resistance) or resistance<=0 or
+                    not math.isfinite(capacitance) or capacitance<=0 or reference['P_res']<=0):
+                raise ValueError('QR参考钳位没有正的功率及有限R/C，不能冻结RCD跨负载硬件')
+            fixed['_qr_rcd_hardware']=dict(R_ohm=float(resistance),C_F=float(capacitance),
+                source='reference-Kc-and-exact-clamp-power',reference_voltage_V=float(p['V_in']))
     return fixed
 
 
@@ -91,8 +113,8 @@ def corners(p, v_in_min=None, v_in_max=None,
                 entry.update(skipped=False, mode=op['mode'], D=op['D'], f_sw=op['f_sw'],
                              I_L_pk=op['I_L_pk'], V_sw_max=op['V_sw_max'],
                              ripple_pp=res['wf']['ripple_pp'], eta=res['eta'],
-                             dT=max((d['dT'] for d in devices), default=None),
-                             B_pk=max((d['B_pk'] for d in devices), default=None),
+                             dT=max((d['dT'] for d in devices if d.get('dT') is not None), default=None),
+                             B_pk=max((d['B_pk'] for d in devices if d.get('B_pk') is not None), default=None),
                              fc=loop.get('fc'), pm=loop.get('pm'), min_pm=loop.get('min_pm'),
                              gm_db=loop.get('gm_db'),
                              failed_checks=[c['id'] for c in snap['checks']

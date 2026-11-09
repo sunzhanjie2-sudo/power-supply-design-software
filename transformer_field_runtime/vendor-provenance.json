@@ -1,0 +1,18 @@
+{
+  "purpose": "Private offline geometry interface compatibility; no electrical recomputation",
+  "source_files": [
+    {
+      "name": "transformer_geometry_contract.py",
+      "sha256": "d7b307cd84ca4516986142b8467b140897569c9f32dd7db4cc5fadf81ab53cf7"
+    },
+    {
+      "name": "transformer_geometry.py",
+      "sha256": "857c8abc00e8493e10c463d27ca1fbb3ad924f992b1de7b6561726307e3eec2c"
+    }
+  ],
+  "selected_geometry_functions": [
+    "_assemble_connections",
+    "_geometry_hash",
+    "validate_geometry"
+  ]
+}

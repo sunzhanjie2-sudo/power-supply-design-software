@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations
 
 import numpy as np
@@ -73,6 +74,42 @@ class _Flow:
         current = self.back @ (self.basis @ (q*e+g*f))
         integral = self.back @ (self.basis @ (q*f+g*h))
         return current, integral
+
+    def prepare_current(self, initial, voltage):
+        """Reuse an interval's modal coordinates during diode root searches.
+
+        Only time changes within an RL interval. Event checks do not need the
+        current integral; avoid recomputing both transforms and that integral
+        for every trial time. The event grid and root tolerances are unchanged.
+        """
+        q = self.basis.T @ (self.forward @ initial)
+        g = self.basis.T @ (self.cinv @ voltage)
+        eigen = self.eigen
+        nonzero = eigen > 0
+
+        def current(dt):
+            # Works for a scalar time or a 1-D array of sample times.
+            times = np.asarray(dt)
+            batch = times.ndim != 0
+            rates = eigen[:, None] if batch else eigen
+            z = rates * times
+            small = np.abs(z) < 1e-4
+            if batch:
+                f = np.broadcast_to(times, z.shape).copy()
+                np.divide(-np.expm1(-z), rates, out=f, where=nonzero[:, None])
+                # Preserve the same small-step polynomial as values(); tiny
+                # rounding differences otherwise perturb diode event roots.
+                series = times*(1-z/2+z**2/6-z**3/24)
+                f[small] = series[small]
+            else:
+                f = np.empty_like(eigen)
+                f[small] = dt*(1-z[small]/2+z[small]**2/6-z[small]**3/24)
+                f[~small] = -np.expm1(-z[~small])/eigen[~small]
+            modes = q[:, None] if batch else q
+            drive = g[:, None] if batch else g
+            return self.back @ (self.basis @ (modes*np.exp(-z)+drive*f))
+
+        return current
 
 
 class _Circuit:
@@ -167,9 +204,10 @@ class _Circuit:
             a = list(active)
             ia, ua = current[a].copy(), applied[a]
             inactive = [j for j in range(self.count) if j not in active]
+            propagate = flow.prepare_current(ia, ua)
 
             def constraints(dt):
-                value,_ = flow.values(ia,ua,dt)
+                value = propagate(dt)
                 full = np.zeros(self.count); full[a] = value
                 slope = self._slope(active,full,resistance,applied)
                 slack = self.L @ slope-applied
@@ -213,7 +251,7 @@ class _Circuit:
             dt=left if event is None else event[0]
             if dt > minimum_dt:
                 segments.append(_Segment(offset+elapsed,dt,active,ia,ua,flow,on))
-                value,_=flow.values(ia,ua,dt)
+                value=propagate(dt)
                 current=np.zeros(self.count); current[a]=value
                 current[np.abs(current)<self.current_tol]=0.
                 if np.min(current) < -1e-6:
@@ -250,9 +288,9 @@ def _segment_integrals(segments,count,*,squares=True):
         integral[a]+=charge
         square=np.zeros(len(a))
         if squares:
-            for node,weight in zip(nodes,weights):
-                value,_=segment.flow.values(segment.initial,segment.voltage,(node+1)*segment.dt/2)
-                square+=weight*value**2*segment.dt/2
+            values=segment.flow.prepare_current(segment.initial,segment.voltage)(
+                (nodes+1)*segment.dt/2)
+            square=np.sum(weights*values**2*segment.dt/2,axis=1)
         squared[a]+=square
         if 0 in segment.active:
             local=a.index(0)
@@ -275,24 +313,28 @@ def _sample_solution(circuit,segments,vo,duty,points=2400):
     current=np.zeros((circuit.count,len(times)))
     winding_voltage=np.zeros_like(current)
     clamp=np.zeros(len(times)); switch=np.zeros(len(times))
-    segment_index=0
-    for index,t in enumerate(times):
-        while segment_index<len(segments)-1 and t>=segments[segment_index].t+segments[segment_index].dt-epsilon/2:
-            segment_index+=1
-        segment=segments[segment_index]
+    boundaries=np.array([s.t+s.dt-epsilon/2 for s in segments[:-1]])
+    segment_indices=np.searchsorted(boundaries,times,side='right')
+    for segment_index,segment in enumerate(segments):
         if not segment.active:
             continue
+        indices=np.flatnonzero(segment_indices==segment_index)
+        if not len(indices):
+            continue
         a=list(segment.active)
-        value,_=segment.flow.values(segment.initial,segment.voltage,max(0.,min(segment.dt,t-segment.t)))
-        current[a,index]=value
+        value=segment.flow.prepare_current(segment.initial,segment.voltage)(
+            np.clip(times[indices]-segment.t,0.,segment.dt))
+        current[np.ix_(a,indices)]=value
         _,resistance,applied,_=circuit._parameters(segment.active,segment.on,vo)
-        slope=circuit._slope(segment.active,current[:,index],resistance,applied)
-        winding_voltage[:,index]=circuit.L@slope
+        # Populate the same active-set inverse used by the event solver.
+        circuit._slope(segment.active,current[:,indices[0]],resistance,applied)
+        slope=circuit.inverse_cache[segment.active] @ (applied[a,None]-resistance[a,None]*value)
+        winding_voltage[:,indices]=circuit.L[:,a]@slope
         if 0 in a:
             if segment.on:
-                switch[index]=value[a.index(0)]
+                switch[indices]=value[a.index(0)]
             else:
-                clamp[index]=value[a.index(0)]
+                clamp[indices]=value[a.index(0)]
     gate=times<duty*period
     # Terminal primary voltage includes copper drop.  The OFF ideal clamp
     # therefore reaches Vin+Vc, whereas the ON MOS drop is Ron*ip.
@@ -305,6 +347,75 @@ def _sample_solution(circuit,segments,vo,duty,points=2400):
                 i_sw=switch,i_in=switch.copy(),i_clamp=clamp,v_sw=vds,
                 gate_on=gate,i_magnetizing=(circuit.L[0]@current)/circuit.L[0,0],
                 lambda_p=circuit.L[0]@current,output_voltages=vo.copy())
+
+
+@lru_cache(maxsize=6)
+def _periodic_solution(matrix,dcr,vin,vf,rd,ron,rs,clamp,period,
+                       target,blocking,rated,main,current_scale,initial,
+                       nominal_duty,nominal_sw_peak):
+    """Small electrical-only cache shared by endpoint/report recalculations.
+
+    Keys contain every RL circuit, load and solver-seed input. Curves, BOM,
+    thermal data and compensator edits do not change this physical period.
+    Retain at most six compact traces, no circuits, optimizers or GUI objects.
+    The caller copies arrays before publishing or adding presentation data.
+    """
+    from calculation_scheduler import check_calculation_cancelled
+    check_calculation_cancelled()
+    circuit=_Circuit(matrix,dcr,vin,vf,rd,ron,rs,clamp,period)
+    target,blocking,rated,current_scale,initial=map(np.asarray,
+        (target,blocking,rated,current_scale,initial))
+    count=len(target)
+    target_cap=target+blocking
+    load_r=target**2/rated
+    other=[j for j in range(count) if j!=main]
+    x0=np.r_[initial/current_scale,np.ones(count-1),nominal_duty]
+    lower=np.r_[np.zeros(count),np.full(count-1,.05),.005]
+    upper=np.r_[np.full(count,30.),np.full(count-1,5.),.9]
+    x0=np.maximum(lower+1e-8,np.minimum(upper-1e-8,x0))
+    load_scale=np.maximum(rated/target,.001)
+
+    def decode(x):
+        voltage=target_cap.copy()
+        voltage[other]=blocking[other]+target[other]*x[count:2*count-1]
+        return x[:count]*current_scale,voltage,float(x[-1])
+
+    def residual(x):
+        check_calculation_cancelled()
+        start,voltage,duty=decode(x)
+        end,segments=circuit.cycle(start,voltage,duty)
+        average=_segment_integrals(segments,count+1,squares=False)[0]/period
+        return np.r_[(end[1:]-start)/current_scale,
+                     (average[1:]-(voltage-blocking)/load_r)/load_scale,
+                     end[0]/max(nominal_sw_peak,.01)]
+
+    def solve_from(seed):
+        return least_squares(residual,seed,bounds=(lower,upper),
+                             xtol=2e-10,ftol=2e-10,gtol=2e-10,
+                             max_nfev=180,diff_step=2e-5)
+    solved=solve_from(x0)
+    # An auxiliary diode that never turns on has no local charge derivative.
+    # Start it on either side of conduction before declaring the case unsolved.
+    if other and (not solved.success or np.max(np.abs(solved.fun))>2e-5):
+        for voltage_scale in (.95,.85,1.03):
+            seed=x0.copy()
+            seed[count:2*count-1]=voltage_scale
+            trial=solve_from(seed)
+            if np.max(np.abs(trial.fun))<np.max(np.abs(solved.fun)):
+                solved=trial
+            if solved.success and np.max(np.abs(solved.fun))<=2e-5:
+                break
+    start,vc,duty=decode(solved.x)
+    error=residual(solved.x)
+    if not solved.success or np.max(np.abs(error))>2e-5:
+        raise CoupledConvergenceError(f'耦合矩阵周期/电荷平衡未收敛（最大归一化残差 {np.max(np.abs(error)):.3g}）；请复核匝比、负载、钳位及 DCR')
+    end,segments=circuit.cycle(start,vc,duty)
+    integrals=_segment_integrals(segments,count+1)
+    solution=_sample_solution(circuit,segments,vc,duty)
+    check_calculation_cancelled()
+    return dict(start=start,end=end,voltage=vc,duty=duty,error=error,
+                iterations=int(solved.nfev),integrals=integrals,solution=solution,
+                clamp_duty=float(sum(s.dt for s in segments if not s.on and 0 in s.active)/period))
 
 
 def solve_coupled_flyback(p,nominal_op):
@@ -406,9 +517,6 @@ def solve_coupled_flyback(p,nominal_op):
     if not np.isfinite(kc) or kc<=1 or clamp<=highest*1.001:
         raise ValueError('耦合矩阵要求 Kc>1，且钳位电压高于所有绕组目标反射电压；请提高 Kc')
     period=1/float(p['f_sw'])
-    circuit=_Circuit(model['L'],model['R'],vin_bus,vf,rd,
-                     float(p.get('Rds_on',0)),float(p.get('Rs',0)),clamp,period)
-    other=[j for j in range(count) if j!=main]
     nominal_children=nominal_op.get('output_ops',[nominal_op])
     current_scale=np.array([max(float(q.get('I_d_pk',rated[j]/target[j]*3)),rated[j]/target[j],.01)
                             for j,q in enumerate(nominal_children)])
@@ -418,39 +526,37 @@ def solve_coupled_flyback(p,nominal_op):
                       for j,q in enumerate(nominal_children)])
     if len(initial)!=count:
         initial=np.zeros(count)
-    x0=np.r_[initial/current_scale,np.ones(count-1),float(nominal_op['D'])]
-    lower=np.r_[np.zeros(count),np.full(count-1,.05),.005]
-    upper=np.r_[np.full(count,30.),np.full(count-1,5.),.9]
-    x0=np.maximum(lower+1e-8,np.minimum(upper-1e-8,x0))
-    load_scale=np.maximum(rated/target,.001)
+    from calculation_scheduler import check_calculation_cancelled
+    check_calculation_cancelled()
+    point=copy.deepcopy(_periodic_solution(
+        tuple(map(tuple,model['L'])),tuple(model['R']),vin_bus,tuple(vf),tuple(rd),
+        float(p.get('Rds_on',0)),float(p.get('Rs',0)),clamp,period,
+        tuple(target),tuple(blocking),tuple(rated),main,tuple(current_scale),
+        tuple(initial),float(nominal_op['D']),float(nominal_op['I_sw_pk'])))
+    check_calculation_cancelled()
+    return finish_operating_point(p,nominal_op,model,rails,metadata,point,period,
+        target,blocking,rated,vin_bus,vf,rd,clamp,main)
 
-    def decode(x):
-        voltage=target_cap.copy()
-        voltage[other]=blocking[other]+target[other]*x[count:2*count-1]
-        return x[:count]*current_scale,voltage,float(x[-1])
 
-    def residual(x):
-        from calculation_scheduler import check_calculation_cancelled
-        check_calculation_cancelled()
-        start,voltage,duty=decode(x)
-        end,segments=circuit.cycle(start,voltage,duty)
-        average=_segment_integrals(segments,count+1,squares=False)[0]/period
-        return np.r_[(end[1:]-start)/current_scale,
-                     (average[1:]-(voltage-blocking)/load_r)/load_scale,
-                     end[0]/max(float(nominal_op['I_sw_pk']),.01)]
+def finish_operating_point(p,nominal_op,model,rails,metadata,point,period,
+                           target,blocking,rated,vin_bus,vf,rd,clamp,main):
+    """Publish one verified RL period; shared by fixed-frequency and QR.
 
-    solved=least_squares(residual,x0,bounds=(lower,upper),
-                         xtol=2e-10,ftol=2e-10,gtol=2e-10,
-                         max_nfev=180,diff_step=2e-5)
-    start,vc,duty=decode(solved.x)
+    No control/timing equations live here. Exact charge/energy accounting and
+    output-port conventions are identical for either solved switching period.
+    """
+    op=copy.deepcopy(nominal_op)
+    op.update(Ts=float(period),f_sw=1/float(period))
+    from isolated_outputs import RAIL_KEYS
+    from voltage_nodes import input_drop,CONVENTION
+    target_cap=target+blocking
+    load_r=target**2/rated
+    start,vc,duty=point['start'],point['voltage'],point['duty']
     vo=vc-blocking
-    error=residual(solved.x)
-    if not solved.success or np.max(np.abs(error))>2e-5:
-        raise CoupledConvergenceError(f'耦合矩阵周期/电荷平衡未收敛（最大归一化残差 {np.max(np.abs(error)):.3g}）；请复核匝比、负载、钳位及 DCR')
-    end,segments=circuit.cycle(start,vc,duty)
-    integral,squared,on_integral,on_squared,clamp_integral=_segment_integrals(segments,count+1)
+    end,error=point['end'],point['error']
+    integral,squared,on_integral,on_squared,clamp_integral=point['integrals']
     average,rms2=integral/period,squared/period
-    solution=_sample_solution(circuit,segments,vc,duty)
+    solution=point['solution']
     solution.update(output_voltages=vo.copy(),capacitor_voltages=vc.copy())
     if float(np.min(solution['i_winding'])) < -1e-6:
         raise CoupledConvergenceError('周期样本中出现反向绕组电流；理想二极管导通约束未通过，不输出结果')
@@ -484,7 +590,7 @@ def solve_coupled_flyback(p,nominal_op):
     turnon_overlap_current=max(float(im[0]),0.)
     before_off=solution['i_sw'][time<duty*period]
     turnoff_current=float(before_off[-1]) if len(before_off) else primary_peak
-    metadata.update(converged=True,iterations=int(solved.nfev),duty=duty,
+    metadata.update(converged=True,iterations=point['iterations'],duty=duty,
         clamp_voltage=clamp,load_resistances=load_r.tolist(),
         output_voltages=vo.tolist(),capacitor_voltages=vc.tolist(),output_blocking_drops=blocking.tolist(),
         feedback_voltage=float(vc[main]),feedback_target=float(target_cap[main]),
@@ -501,7 +607,7 @@ def solve_coupled_flyback(p,nominal_op):
         periodic_current_residual_A=(end[1:]-start).tolist(),
         charge_balance_A=(average[1:]-vo/load_r).tolist(),
         winding_rms=np.sqrt(np.maximum(rms2,0)).tolist(),
-        clamp_duty=float(sum(s.dt for s in segments if not s.on and 0 in s.active)/period))
+        clamp_duty=point['clamp_duty'])
     op.update(coupled_model=metadata,coupled_solution=solution,
         D=duty,Dp=1-duty,mode='CCM' if np.min(im)>max(np.max(im)*1e-5,1e-7) else 'DCM',
         P_out=pout,P_in_est=pin,I_in_est=float(on_integral/period),
@@ -541,7 +647,7 @@ def solve_coupled_flyback(p,nominal_op):
             I_d_avg=float(average[j+1]),I_d_rms=float(np.sqrt(rms2[j+1])),
             I_s_rms=float(np.sqrt(rms2[j+1])),local_mode=local_mode,branch_mode=local_mode,mode=local_mode,
             V_d_max=float(np.max(vc[j]+solution['v_winding'][j+1]+model['R'][j+1]*current)),
-            C_min=float(vo[j]/load_r[j]*duty/(p['f_sw']*max(rail.get('ripple_target',.01),1e-9)*vo[j])))
+            C_min=float(vo[j]/load_r[j]*duty*period/(max(rail.get('ripple_target',.01),1e-9)*vo[j])))
         branch_ops.append(child)
     op['output_ops']=branch_ops
     selected=branch_ops[main]

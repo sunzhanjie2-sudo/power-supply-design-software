@@ -12,6 +12,21 @@ from calculation_scheduler import CalculationCancelled
 
 
 class RuntimeChecks(unittest.TestCase):
+    def test_protection_reason_uses_only_evidence_at_first_trip(self):
+        from spice_analysis import protection_stop
+        t=np.arange(12)*1e-7
+        channels={'v(fault)':np.array([0]*6+[1]*6), 'v(xu_ctrl:xsuper:scp)':np.array([0]*5+[1]+[0]*6),
+            'v(xu_ctrl:olpt)':np.array([0]*10+[1,1]), 'v(xu_ctrl:cs_filtered)':np.linspace(0,.6,12),
+            'i(lp)':np.arange(12.)}
+        raw=MagicMock(time=t,names=channels);raw.trace.side_effect=channels.__getitem__
+        trip=protection_stop(raw,{'fault_max':1},250000)
+        self.assertAlmostEqual(trip['first_trip_s'],6e-7)
+        self.assertIn('SCP',trip['cause']);self.assertNotIn('OLP',trip['cause'])
+        self.assertEqual(trip['primary_peak_a'],6.)
+        del channels['v(xu_ctrl:xsuper:scp)']
+        self.assertIn('待核对',protection_stop(raw,{'fault_max':1},250000)['cause'])
+        self.assertIsNone(protection_stop(raw,{'fault_max':0},250000))
+
     def test_single_and_multi_result_contracts(self):
         import json
         from runtime_resources import configure_numeric_threads

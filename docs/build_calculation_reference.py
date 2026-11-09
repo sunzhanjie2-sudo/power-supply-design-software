@@ -264,7 +264,10 @@ def build(source,output):
     E('lg=μ₀NL²Ae/L；μ₀=4π×10⁻⁷ H/m')
     E('Np,auto=ceil[VinDTs/(BmaxAe)]')
     E('Ns,auto=max(1,round(Np/N))')
-    P('按数据库磁芯的 Ae·Wa 选择面积乘积满足要求的磁芯，或使用用户指定芯型。气隙假定磁芯磁导率较高、气隙主导磁阻，没有包含边缘磁通、骨架、分布气隙或实际 AL。电感单线径自动选取；变压器支持用户匝数、单股线径和并绕股数。正激独立选择变压器与输出电感。')
+    P('按数据库磁芯的 Ae·Wa 选择面积乘积满足要求的磁芯，或使用用户指定芯型。上面的电感气隙公式忽略磁芯磁阻。变压器另按有限磁导率磁路计算，μr=0 使用材料手册初始磁导率，le 固定由 Ve/Ae 派生，只读显示，le 与平均匝长 MLT 分别处理。')
+    E('AL=Lm/Np²；L0=μ₀·μr·Ae·Np²/le')
+    E('lg=μ₀·Ae·Np²/Lm−le/μr')
+    P('反激与准谐振使用原边 L，正激变压器使用 Lm_forward。lg 为折算到 Ae 的总等效气隙，忽略边缘磁通，需以加工后 AL 测量调整。若 lg<0，目标 Lm 高于无气隙电感 L0，显示不可实现并复核匝数、磁导率与磁芯。该估算不改变电气输入 Lm，也不会自动填充三维模型的真实加工气隙。依据 TI UCC2863x SLUSBW3D 式(45)，https://www.ti.com/lit/ds/symlink/ucc28630.pdf。')
     H('7.2  真实峰值磁密与摆幅不同')
     E('电感 / 反激：Bpk=L·Ipk/(NAe)')
     E('正激变压器：ΔB=VinDTs/(NpAe)，Bpk=ΔB/2')
@@ -272,10 +275,10 @@ def build(source,output):
     H('7.3  绕组电阻与趋肤修正')
     E('δ=√[ρ/(πfsμ₀)]；x=dwire/δ')
     E('Fr=1+x⁴/(48+0.8x⁴)')
-    E('Rdc=ρ·MLT·N/[nstrand·πdwire²/4]')
+    E('Rdc=ρ·MLT·N/[nparallel·nstrand·πdwire²/4]')
     E('Pcu=Fr·Rdc·Irms²')
-    E('fill=Σ(N·nstrand·Awire)/Wa')
-    S('fill 只统计裸铜截面积，不含绝缘与爬电空间；Fr 是简化经验修正，不是 Dowell 邻近效应解。变压器中各股假定均匀分流。')
+    E('fill=Σ(N·nparallel·nstrand·Awire)/Wa')
+    S('b 为线圈并绕根数，nstrand 为单根线股数，旧工程及示例 b=1。6 匝、并绕 2 根仍为 6 匝，截面为 12 根线。固定线径与股数时 b 加倍使铜面积加倍、DCR 与 J 减半；电气工作点需重新求解。fill 只统计裸铜，不含绝缘与爬电；Fr 是简化修正，假定均匀分流，未求解并绕环流及邻近效应。')
 
     chapter('7.4  磁芯损耗：实际采用 NSE 波形积分')
     P('材料常数采用 Pv[mW/cm³]=k·f[kHz]^α·B[T]^β。1 mW/cm³=10³ W/m³，因此体积 Ve 使用 m³ 时最终乘 10³Ve。软件保留经典 Steinmetz、iGSE 与 NSE 闭式函数，但正常磁件设计路径统一采用实际 B(t) 的 NSE 积分，不是三种模型按拓扑自动切换。')
@@ -318,7 +321,7 @@ def build(source,output):
         ('Boost','(2Vo/D)(M−1)/(2M−1)','(2M−1)/[(M−1)RC]'),
         ('Buck-Boost / Flyback / QR','Vo/D','2/(RC)'),
     ],[2.05,2.6,2.45])
-    P('M=Vo/Vin；采用实际 D。PCM 与 VM 在 DCM / BCM 分支都返回以上模型，没有另建 DCM 电流内环或 QR 变频控制传函。RHP 高频动态被忽略，因此“无 RHP 零点”只针对这个低频近似。')
+    P('M=Vo/Vin，D 取实际工作点。单路定频反激 SSR 的 DCM 峰值电流环路按每周期储能线性化，含采样增益、补偿斜坡和各输出电容 ESR。上表为传统占空比近似。QR 的变频模型另见专题说明。')
 
     chapter('8.3  峰值电流模式：调制器与内环')
     E('Fm = ','fs','Rs·A_sense·[ma+(M₁−M₂)/2]')
@@ -511,10 +514,10 @@ def build(source,output):
     P('每路按独立 L、C 和负载求解，变压器原边电流为次级负载折返加励磁电流；共享 PWM 占空比。原边综合电流采用折算等效电感，环路采用全部输出电容能量折算到主反馈路的 C_eq。任一路进入 DCM 时，其所需占空比可能不同，本版本明确拒绝该标称工况，角点记录为无效，不将各路当作可独立稳压的变换器。')
     H('14.4  损耗、磁件与模型边界')
     P('共享磁芯和原边铜损只计一次；副边逐绕组累加交流修正铜损与窗口面积；正激逐路累计输出电感损耗。原边开关、输入电容、采样、RCD 或钳位电容只计一次，各路整流、电容和输出防反独立累计。PSR 辅助采样绕组加入窗口与分压负载的铜损，未假定它供应完整 VCC 功率。')
-    E('Acu_j=nstrand_j·π·d_j²/4')
+    E('Acu_j=nparallel_j·nstrand_j·π·d_j²/4')
     E('J_j=Irms_j/Acu_j')
     E('Rdc_j=ρ·MLT·Ns_j/Acu_j')
-    P('线径为单股裸铜直径，股数为总并绕股数；电流密度采用周期 RMS 电流除以总裸铜截面积，内部 A/m² 除以一百万后显示 A/mm²。DCR 由输入铜电阻率、MLT、整数匝数与铜面积自动生成，不再要求用户另填电阻。MLT=0 时沿用所选磁芯的目录估计，未包含端接、额外引线或未输入的温升电阻变化。利兹线压扁和几何填充系数不改变铜面积。')
+    P('线径为单股裸铜直径，nstrand 为单根完整线的股数，b 为完整线圈并绕根数。每路输出可独立配置 b，缺省 1；电流密度采用整个绕组周期 RMS 电流除以总裸铜面积，A/m² 除以一百万后显示 A/mm²。DCR 由铜电阻率、MLT、整数匝数与铜面积生成。MLT=0 时沿用磁芯目录估计，未含端接、额外引线或未输入的温升电阻变化。利兹线压扁和几何分束不改变铜面积。')
     P('SSR 仅关闭所选反馈路的环路。由匝比定义得到的电压不能再当作独立目标进行取整误差合格判定；未反馈路仍应做独立负载、空载、热态压降和耦合复核。当前角点按相同比例改变全部输出功率并固定绕组几何，不等比例负载需另行仿真。')
 
     chapter('15  MP6005 原边反馈 PSR')
@@ -609,6 +612,10 @@ def build(source,output):
     S('https://www.monolithicpower.com/en/documentview/productdocument/index/version/2/document_type/Datasheet/lang/en/sku/MP6005GK/')
     P('本文件对应 2026-10-18 输入范围与双工况报告版；新版程序目录为 Input_voltage_range_update。启动仍为 40W CCM 单路反激，上下限均 30V，预设效率 93%，耦合矩阵默认关闭；用户自行填写实际输入范围。SSR 保留 auto / type2 / type3；PSR 使用物理二型 COMP 网络。保留 _internal 子目录，计算说明从帮助菜单打开。多路只有基准电压输入，其余按实际副边匝比估算；线径和股数旁显示 RMS 电流密度，耦合电路和铜损共用自动几何 DCR。t1–t8 MOS 图与 Word 报告共享快照；非理想耦合反激按第 18 章建立低频实验环路，不沿用旧 Bode；临时低频门槛仍停用，高频精度尚未验证。窗口几何评估继续支持等效圆束、利兹线等面积压扁、疏绕及密绕左右靠齐，以及同一绕组分配到不连续物理层；几何排布不反向修改铜面积、DCR 或 kij。数值线程限制、按需绘图和后台最新请求队列继续保留。')
     P('内容用于初选与设计复核，不是电源安全标准、器件规格书、量产工艺文件或样机测量报告。发现本文与源代码冲突时，以实际运行版本及计算入口为准并进行独立核验。')
+    from docs.update_cross_regulation_documents import update_document
+    update_document(d, 'reference')
+    from docs.update_qr_cross_regulation_reference import update_document as update_qr_cross
+    update_qr_cross(d)
     Path(output).parent.mkdir(parents=True,exist_ok=True)
     d.save(output)
     print(f'Saved {output}; tables={len(d.tables)}; images={len(d.inline_shapes)}; native equations={len(d.element.xpath(".//m:oMath"))}')

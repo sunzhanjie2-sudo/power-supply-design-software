@@ -24,7 +24,10 @@ import numpy as np
 
 def spec():
     p = load_spec(json.loads((ROOT/'examples/40W_CCM_FLYBACK.json').read_text(encoding='utf-8')))
-    return dict(p, V_in_min=20., V_in_max=40., gfs=5.)
+    # This suite deliberately exercises the legacy current-dependent model;
+    # shipped real-part examples now explicitly select fixed datasheet values.
+    return dict(p, V_in_min=20., V_in_max=40., gfs=5.,
+                device_curve_settings={}, mos_miller_mode='auto')
 
 
 class MillerChecks(unittest.TestCase):
@@ -112,7 +115,7 @@ class MillerChecks(unittest.TestCase):
     def test_coupled_and_forward_use_primary_switch_not_output_currents(self):
         coupled = load_spec(json.loads((ROOT/'examples/3_OUTPUT_COUPLED_FLYBACK.json').read_text(encoding='utf-8')))
         forward = dict(spec(),topology='ACF-FORWARD')
-        for p in (dict(coupled,gfs=5.),forward):
+        for p in (dict(coupled,gfs=5.,device_curve_settings={},mos_miller_mode='auto'),forward):
             r = compute_design(p); gate = r['semi']['switch']['gate']; op = r['op']
             self.assertAlmostEqual(gate['Vgp_on'],p['Vth']+max(op.get('I_sw_on',op['I_L_min']),0.)/5)
             self.assertAlmostEqual(gate['Vgp_off'],p['Vth']+abs(op.get('I_sw_off',op['I_L_pk']))/5)
@@ -125,6 +128,7 @@ class MillerUIChecks(unittest.TestCase):
         cls.root = tk.Tk(); cls.root.withdraw()
         cls.app = main.PowerSupplyAnalyzer(cls.root)
         cls.base = copy.deepcopy(cls.app._config_dict())
+        cls.base.update(device_curve_settings={},mos_miller_mode='auto')
 
     @classmethod
     def tearDownClass(cls):

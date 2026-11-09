@@ -75,7 +75,8 @@ def vals(path, scale=1, digits=4, unit=''):
 
 def build():
     baseline=hashlib.sha256(REF.read_bytes()).hexdigest()
-    assert baseline==DATA['original_reference_sha256']
+    # This builder must leave the current reference unchanged; its historical
+    # 2026-10-23 hash is provenance, not a ban on later authorized revisions.
     doc=new_document('多路反激电源设计入门教程',
         '用一份真实配置走完从需求到报告的计算过程',
         '多路反激电源设计入门教程')
@@ -540,7 +541,7 @@ def build():
         ('有效体积 Ve','2.8148 cm³','2.8148×10⁻⁶ m³'),
         ('数据库窗口面积 Wa','30 mm²','3.0×10⁻⁵ m²'),
         ('用户每匝平均线长 MLT','40 mm','0.04 m'),
-        ('材料标签','N87','损耗仍由可编辑 k α β 决定'),
+        ('材料标签','DMR44','损耗仍由可编辑 k α β 决定'),
     ],[2.6,2.0,2.5])
     P('Ae 是磁路截面积，不是窗口面积。MLT 是每一匝导线的平均长度，不是磁路长度。本例采用用户输入 40 mm，不能在 DCR 公式中误用磁芯有效磁路长度。数据库几何是模型输入，不替代实际采购骨架和磁芯的尺寸公差。')
     H('11.2  匝数与磁通的第一步关系')
@@ -554,11 +555,12 @@ def build():
         ('峰值参考 Bpk','display.magnetics.0.B_pk',1e3,6,' mT'),
         ('峰峰摆幅 ΔB','display.magnetics.0.dB',1e3,6,' mT'),
     ]),[3,2.05,2.05])
-    P('Bsat 输入为 0.4 T，Bmax 设计约束为 0.3 T。两端点参考峰值低于这两个值，但温升、气隙、偏置、实际材料温度特性和局部热点仍需另外确认。软件此处未从复杂矩阵唯一反推出可生产的磁芯气隙，不能凭这份结果省去 AL 和气隙实测。')
+    P('Bsat 输入为 0.4 T，Bmax 设计约束为 0.3 T。两端点参考峰值低于这两个值，温升、偏置和实际材料温度特性仍需确认。气隙按原边目标 L 与线性磁路作初算，需核对加工后的 AL。')
     H('11.4  线径 股数 MLT 怎样得到 DCR')
-    E('Astrand=π·dwire²/4；Atotal=nstrand·Astrand')
+    E('Astrand=π·dwire²/4；Atotal=nparallel·nstrand·Astrand')
     E('Rdc=ρ·MLT·Nturn/Atotal')
     P('原边单股直径 0.1 mm，40 股并绕，总裸铜面积 40×π×0.1²÷4＝0.314159 mm²。6 匝总长度约 6×40＝240 mm，使用 ρ＝1.72×10⁻⁸ Ω·m，DCR≈13.1398 mΩ。它不是由用户再输入一个独立电阻决定。JSON 中旧 dcr 数组不覆盖几何计算。')
+    P('本例线圈并绕数 b=1，nstrand=40 表示每根利兹线内有 40 股。如果改为两根相同利兹线并绕 6 匝，b=2，截面为 12 根整线，电气仍是 6 匝；每匝铜面积为 0.628319 mm²，DCR≈6.56992 mΩ。若保持同一 RMS 电流，J 减半；实际工作点随后仍要重算。每根线内分束仅重新组合这 40 股，不能再次增加铜面积。')
     E('J_j=Irms_j/Acu_j')
     rows=[]
     tr0,tr1=[c['display']['magnetics'][0] for c in CASES]
@@ -593,6 +595,12 @@ def build():
     P('用户输入的变压器至环境热阻 Ri-a＝100 K/W。20 V 时 ΔT＝0.417204×100≈41.72 K；30 V 时约 47.82 K，均超过配置的 40 K 评审上限。温升 K 的数值与摄氏度差值相同，但不是绝对温度。若环境 25 ℃，简单估算整体温度约为 66.7 ℃、72.8 ℃；环境 25 ℃只是这里的演示假设，不是 JSON 输入。')
     P('这种总损耗乘热阻的集中参数模型不等于绕组热点温度。热阻要按实际骨架、灌封、气流、安装与附近热源校准。旧 h_conv＝10 不再用来替代变压器热阻，不能把两个温升模型重复叠加。')
     source('magnetics  isolated_outputs.multi_magnetics  winding_coupling.resolve_winding_geometry')
+    H('11.8  磁导率怎样确定气隙')
+    P('材料相对磁导率 μr 无量纲。μr=0 跟随材料手册，le 固定由 Ve/Ae 派生，不需输入。DMR44 初始 μi=2400±25%（25 °C），小信号数据用于初版磁路估算。')
+    E('le=Ve/Ae；AL=Lm/Np²；L0=μ₀·μr·Ae·Np²/le')
+    E('lg=μ₀·Ae·Np²/Lm−le/μr')
+    P('本例 Np=6、Lm=8 μH、Ae=62 mm²、Ve=2814.8 mm³，le=45.4 mm，得 AL=222.222 nH/匝²、无气隙电感 148.272 μH、总等效气隙约 0.331685 mm。两输入端点使用同一气隙。')
+    P('lg<0 表示当前磁芯、匝数和磁导率不能实现目标 Lm。计算忽略边缘磁通，实际加工按 AL 测量调整；整副垫片需考虑外柱气隙。来源 TI UCC2863x SLUSBW3D 式 45，https://www.ti.com/lit/ds/symlink/ucc28630.pdf。')
 
     C('12  窗口能否绕下要单独评估')
     H('12.1  铜面积够不代表实际能够绕制')
@@ -611,6 +619,7 @@ def build():
     E('b_w=1.5·D_b；b_h=D_b/1.5')
     P('以原边 40 股为例，外径 0.13 mm、填充系数 0.75，等效线束直径约 0.94939 mm，压扁后宽约 1.42408 mm、高约 0.63292 mm。画的是一个等效椭圆，不是把每根细铜丝逐个摆出。填充系数和压扁率为几何假设，真实利兹线含外包层且形状不规则，应以样线测量为准。')
     P('普通单根铜线不套用利兹线的压扁假设。疏绕把本层匝数分散在可用宽度；密绕按紧凑节距排列并可选择靠左、靠右或居中。这些是摆放方式，不会自动重新计算 kij 或 DCR。')
+    P('均匀排布是生成初始位置的一键操作。用户可点选某一匝线并左右拖动，或在画布中按左右方向键微调；步长可设，Shift×10、Alt÷10，Ctrl+Z 撤销。首次移动固定物理层序，保存的是稳定段 ID 与本层匝号、束号对应的轴向中心，单位 m；径向位置由层序决定。重叠或净隙不足会标红。保存工程可保留位置，报告与建模导出使用同一坐标；拖动不启动电气求解。')
     F('tutorial_winding','图 7  本例五层交错绕制  OUT1 的 12 匝分成第 1 层和第 5 层各 6 匝',6.95)
     H('12.4  按层相加检查高度')
     rows=[]
@@ -803,7 +812,7 @@ def build():
     ],[1.75,1.8,1.8,1.75])
     H('A3  变压器和补偿')
     T(['参数','生效值'],[
-        ('磁芯 材料','PQ20 20  N87 标签'),('Bmax Bsat','0.3 T  0.4 T'),
+        ('磁芯 材料','PQ20 20  DMR44 标签'),('Bmax Bsat','0.3 T  0.4 T'),
         ('目标电流密度 J 和 Ku','4 A/mm²  0.3  手动绕组以实际结果复核'),
         ('原边 Np 线径 股数','6 匝  0.1 mm  40 股'),('MLT ρ','40 mm  1.72×10⁻⁸ Ω·m'),
         ('k α β','27.49  1.456  2.246'),('热阻 温升上限','100 K/W  40 K'),
@@ -860,7 +869,7 @@ def build():
     S('源 JSON SHA256  '+DATA['source']['sha256'])
     S('计算模型版本  '+str(DATA['provenance']['model_version']))
     S('计算源码指纹  '+str(DATA['provenance']['code_fingerprint']))
-    S('原公式说明文档 SHA256  '+baseline)
+    S('2026-10-23 初版保留记录  当时公式说明 SHA256  '+DATA['original_reference_sha256'])
     H('C3  进一步阅读')
     P('[1] Texas Instruments  Power Tips 关于多输出反激交叉调整率的技术说明。用于理解漏感和绕组连接如何影响多路输出，不作为本例电压的替代计算。')
     S('https://www.ti.com/document-viewer/lit/html/SSZTCW3/GUID-9BE5B4A2-3166-4329-A3F0-4F836580FCC7')
@@ -875,6 +884,8 @@ def build():
         border.getparent().remove(border)
     for p in doc.paragraphs:
         p.paragraph_format.widow_control=True
+    from docs.update_cross_regulation_documents import update_document
+    update_document(doc, 'tutorial')
     OUT.parent.mkdir(parents=True,exist_ok=True)
     doc.save(OUT)
     assert hashlib.sha256(REF.read_bytes()).hexdigest()==baseline

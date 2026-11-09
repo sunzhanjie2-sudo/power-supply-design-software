@@ -11,6 +11,7 @@ import json
 import queue
 import sys
 import threading
+import time
 
 
 class CalculationCancelled(Exception):
@@ -29,6 +30,16 @@ def current_calculation_cancelled():
 def check_calculation_cancelled():
     if current_calculation_cancelled():
         raise CalculationCancelled()
+    yield_at = getattr(_CURRENT, 'ui_yield_at', None)
+    if yield_at is not None and time.monotonic() >= yield_at:
+        # Tiny NumPy/Python iterations can repeatedly win the GIL while Tk is
+        # returning from Tcl calls. Give the UI a short, bounded opportunity
+        # to process input. Only GUI workers opt in; batch/web solves do not
+        # sleep, and no solver sample or convergence tolerance is changed.
+        time.sleep(.001)
+        _CURRENT.ui_yield_at = time.monotonic() + .012
+        if current_calculation_cancelled():
+            raise CalculationCancelled()
 
 
 def parameter_signature(parameters):
@@ -283,6 +294,7 @@ class LatestCalculationWorker:
         generation, kind, parameters, function, key = job
         cancelled = lambda: not self.is_current(generation)
         _CURRENT.cancelled = cancelled
+        _CURRENT.ui_yield_at = time.monotonic() + .012
         try:
             value = self.cached(kind, parameters) if key else None
             cached = value is not None
@@ -306,6 +318,7 @@ class LatestCalculationWorker:
                                             error=error))
         finally:
             _CURRENT.cancelled = None
+            _CURRENT.ui_yield_at = None
 
 
 def calculate_efficiency_curve(parameters, cancelled, *, n_pts=12):

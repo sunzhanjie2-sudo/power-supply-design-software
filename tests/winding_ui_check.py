@@ -142,14 +142,18 @@ class WindingUIChecks(unittest.TestCase):
                 self.assertEqual(self.errors,[])
 
     def test_narrow_view_reflows_details_and_remains_scrollable(self):
+        # Headless Windows sessions can cap a top-level window below the two-column breakpoint.
+        self.root.maxsize(1200,900)
         self.configured()
         self.root.geometry('520x700');self.root.update()
+        self.assertEqual(self.root.winfo_width(),520)
         self.assertEqual(self.app._winding_input_columns,1)
         frame=self.app._winding_details_frame
         for widget in self.app._winding_detail_widgets.values():
             self.assertLessEqual(widget.winfo_x()+widget.winfo_width(),frame.winfo_width())
         self.assertLess(self.app._winding_view.canvas.yview()[1],1)
         self.root.geometry('970x700');self.root.update()
+        self.assertEqual(self.root.winfo_width(),970)
         self.assertEqual(self.app._winding_input_columns,2)
 
     def test_mm_to_si_roundtrip_keeps_per_winding_overrides_and_order(self):
@@ -269,6 +273,49 @@ class WindingUIChecks(unittest.TestCase):
             self.assertLessEqual(widget.winfo_x()+widget.winfo_width(),widget.master.winfo_width())
         self.assertLess(self.app._winding_view.canvas.yview()[1],1)
         self.assertGreater(frame.winfo_reqheight(),100)
+        tree=self.app._winding_plan_tree
+        self.assertLess(tree.xview()[1],1)
+        tree.xview_moveto(1)
+        self.assertAlmostEqual(tree.xview()[1],1)
+
+    def test_interleaved_insulation_readout_distinguishes_each_actual_boundary(self):
+        self.app._winding_source=[
+            dict(id=key,turns=turns,strands=1,bare_diameter=.2e-3)
+            for key,turns in [('P',60),('OUT1',30),('OUT2',7)]]
+        plan=[dict(winding_id=key,turns=turns,section_id=sid)
+              for key,turns,sid in [('P',27,'P_A'),('OUT1',15,'P_B'),('OUT2',7,'P_C'),
+                                    ('OUT1',15,'P_D'),('P',27,'OUT1_A'),('P',6,'P_tail')]]
+        self.app._load_winding_config(dict(winding_config=dict(window_width=.0188,window_height=.0052,
+            layer_insulation=.0003,interwinding_insulation=.00002,layer_plan=plan)))
+        self.app._refresh_winding()
+        saved=self.app._winding_config()
+        before=self.app._winding_assessment
+        self.assertIsNotNone(before)
+        tree=self.app._winding_plan_tree
+        self.assertEqual([tree.set(str(i),'insulation_kind') for i in range(6)],
+            ['首层']+['不同绕组相邻层']*4+['同绕组相邻层'])
+        self.assertEqual([float(tree.set(str(i),'insulation_mm')) for i in range(6)],
+            [0,.02,.02,.02,.02,.3])
+        self.assertIn('同绕组界面 1 处',self.app._winding_insulation_note.get())
+        self.assertIn('不同绕组界面 4 处',self.app._winding_insulation_note.get())
+        self.app._winding_vars['layer_insulation'].set('.4')
+        self.app._refresh_winding()
+        after=self.app._winding_assessment
+        for i,(old,new) in enumerate(zip(before['physical_layers'],after['physical_layers'])):
+            self.assertAlmostEqual(new['y']-old['y'],.0001 if i==5 else 0)
+        self.assertAlmostEqual(after['required_height']-before['required_height'],.0001)
+        self.assertEqual(tree.set('5','insulation_mm'),'0.4')
+        self.app._winding_vars['interwinding_insulation'].set('.04')
+        self.app._refresh_winding()
+        for i,(old,new) in enumerate(zip(after['physical_layers'],self.app._winding_assessment['physical_layers'])):
+            self.assertAlmostEqual(new['y']-old['y'],min(i,4)*.00002)
+        self.assertEqual(tree.set('4','insulation_mm'),'0.04')
+        self.app._load_winding_config(saved)
+        self.app._refresh_winding()
+        self.assertEqual(self.app._winding_config(),saved)
+        self.app._winding_plan_editor_vars['turns'].set('invalid')
+        self.app._refresh_winding()
+        self.assertEqual(tree.set('5','insulation_kind'),'待评估')
 
 
 class ApiCompatibilityChecks(unittest.TestCase):

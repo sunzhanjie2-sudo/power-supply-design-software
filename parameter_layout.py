@@ -72,9 +72,12 @@ GROUPS = {
         ('PWM 与斜坡补偿', ('Vm', 'ma_slope')),
     ],
     'mag': [
+        ('成品电感参数（0=未提供）', ('inductor_dcr', 'inductor_rated_current',
+                              'inductor_saturation_current', 'inductor_extra_loss')),
         ('磁密与窗口约束', ('Bmax', 'Bsat', 'Ku')),
+        ('磁导率与气隙估算', ('mu_r',)),
         ('绕组与导线', ('Np', 'Ns', 'd_wire_p', 'd_wire_s', 'n_strand_p',
-                      'n_strand_s', 'MLT')),
+                      'n_strand_s', 'parallel_wires_p','parallel_wires_s','MLT')),
         ('散热与温升', ('Rth_transformer', 'h_conv', 'temp_rise_limit')),
         ('材料与磁芯损耗系数', ('rho', 'k_core', 'a_core', 'b_core')),
     ],
@@ -87,6 +90,10 @@ ISOLATED_TOPOLOGIES = ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD')
 FORWARD_TOPOLOGIES = ('ACF-FORWARD',)
 
 META = {
+    'inductor_dcr': FieldSpec('成品电感直流电阻', 'DCR', 'Ω', topologies=('BUCK','BOOST','BUCK-BOOST')),
+    'inductor_rated_current': FieldSpec('厂家额定 RMS 电流', 'Irms,rated', 'A', topologies=('BUCK','BOOST','BUCK-BOOST')),
+    'inductor_saturation_current': FieldSpec('厂家饱和电流', 'Isat', 'A', topologies=('BUCK','BOOST','BUCK-BOOST')),
+    'inductor_extra_loss': FieldSpec('当前工况附加损耗估算', 'Pextra', 'W', topologies=('BUCK','BOOST','BUCK-BOOST')),
     'V_in': FieldSpec('输入电压', 'Vin', 'V', required=True),
     'V_in_min': FieldSpec('输入电压下限', 'Vin,min', 'V', required=True),
     'V_in_max': FieldSpec('输入电压上限', 'Vin,max', 'V', required=True),
@@ -155,12 +162,16 @@ META = {
     'Bmax': FieldSpec('设计最大磁密', 'Bmax', 'T', required=True),
     'Bsat': FieldSpec('饱和磁密', 'Bsat', 'T'),
     'Ku': FieldSpec('窗口填充系数', 'Ku', ''),
+    'mu_r': FieldSpec('磁材相对磁导率（0=材料预设）', 'μr', '', topologies=ISOLATED_TOPOLOGIES),
+    'le_core': FieldSpec('旧版磁路长度（已停用，按 Ve/Ae 派生）', 'le', 'm', topologies=ISOLATED_TOPOLOGIES),
     'Np': FieldSpec('原边匝数', 'Np', '匝', auto=True, topologies=ISOLATED_TOPOLOGIES),
     'Ns': FieldSpec('副边匝数', 'Ns', '匝', auto=True, topologies=ISOLATED_TOPOLOGIES),
     'd_wire_p': FieldSpec('原边单股线径', 'dp', 'm', auto=True, topologies=ISOLATED_TOPOLOGIES),
     'd_wire_s': FieldSpec('副边单股线径', 'ds', 'm', auto=True, topologies=ISOLATED_TOPOLOGIES),
-    'n_strand_p': FieldSpec('原边并绕股数', 'np', '股', topologies=ISOLATED_TOPOLOGIES),
-    'n_strand_s': FieldSpec('副边并绕股数', 'ns', '股', topologies=ISOLATED_TOPOLOGIES),
+    'n_strand_p': FieldSpec('原边单根线股数', 'np', '股', topologies=ISOLATED_TOPOLOGIES),
+    'n_strand_s': FieldSpec('副边单根线股数', 'ns', '股', topologies=ISOLATED_TOPOLOGIES),
+    'parallel_wires_p': FieldSpec('原边线圈并绕数', 'bp', '根', topologies=ISOLATED_TOPOLOGIES),
+    'parallel_wires_s': FieldSpec('副边线圈并绕数', 'bs', '根', topologies=ISOLATED_TOPOLOGIES),
     'MLT': FieldSpec('每匝平均长度', 'MLT', 'm', auto=True),
     'Rth_transformer': FieldSpec('变压器至环境热阻', 'Ri-a', 'K/W', required=True,
                                  topologies=ISOLATED_TOPOLOGIES),
@@ -199,7 +210,11 @@ def visible(key: str, topology: str, control_mode: str, advanced: bool,
 
     ``advanced`` is accepted for API compatibility but no longer hides fields.
     """
-    if key in ('Rd_diode','Rd_din','Rd_dout'):return False
+    if key in ('Rd_diode','Rd_din','Rd_dout','le_core'):return False
+    from inductor_selection import TOPOLOGIES, DESIGN_FIELDS, FIELDS
+    bought = topology in TOPOLOGIES and not flags.get('inductor_design_enabled', True)
+    if (bought and key in DESIGN_FIELDS) or (not bought and key in FIELDS):
+        return False
     field = META[key]
     return (applicable(key, topology, control_mode)
             and (not field.enabled_by or bool(flags.get(field.enabled_by, False))))

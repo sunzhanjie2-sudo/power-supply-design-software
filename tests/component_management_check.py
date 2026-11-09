@@ -59,7 +59,10 @@ class ComponentChecks(unittest.TestCase):
         self.assertEqual(a['bom_D1_voltage']['state'],'undefined')
 
     def test_no_fabricated_identity_or_default_ratings(self):
-        data=evaluate_components(self.p,self.res)
+        # Shipped examples now deliberately carry real part identities.  This
+        # test owns an explicitly unknown metadata fixture instead of assuming
+        # that a user-facing example must remain empty forever.
+        data=evaluate_components(dict(self.p,component_management={}),self.res)
         self.assertGreater(data['counts']['undefined'],0)
         self.assertEqual(data['counts']['pass'],0)
         q=next(r for r in data['rows'] if r['ref']=='Q1')

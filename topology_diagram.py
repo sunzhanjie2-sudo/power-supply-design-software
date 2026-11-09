@@ -28,14 +28,20 @@ def topology_components(p, solved=None):
 
     add('J1', '输入端口', [('V_in', 'V')])
     add('J2', '输出端口', [('V_out', 'V'), ('P_out', 'W')])
-    add('Q1', '主 N-MOS；功率级 Vgs/Vds 图对象',
+    from component_management import primary_mos_role, controller_reference
+    add('Q1', primary_mos_role(p)+'；功率级 Vgs/Vds 图对象',
         [('Rds_on', 'Ω'), ('Qg', 'C'), ('Coss', 'F')])
     add('R_S1', '主开关电流采样（简化串联）', [('Rs', 'Ω')])
+    controller = controller_reference(p)
+    if controller is not None:
+        rows.append(controller)
     if topo in ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD'):
         add('T1', '隔离变压器；N=Np/Ns',
             [('Lm_forward' if topo == 'ACF-FORWARD' else 'L', 'H'), ('N', '')])
     if topo not in ('FLYBACK', 'QR-FLYBACK'):
-        add('L1', '输出滤波电感' if topo == 'ACF-FORWARD' else '储能 / 滤波电感', [('L', 'H')])
+        from inductor_selection import purchased
+        add('L1', '外购成品电感' if purchased(p) else '输出滤波电感' if topo == 'ACF-FORWARD' else '储能 / 滤波电感',
+            [('L', 'H'), ('inductor_dcr', 'Ω')] if purchased(p) else [('L', 'H')])
     if topo == 'ACF-FORWARD':
         add('Q2', '低侧钳位 P-MOS（负栅压驱动）', [('Rds_aux', 'Ω'), ('Qg_aux', 'C'), ('Coss_aux', 'F')])
         add('C_CL1', '低侧钳位电容', [('C_clamp', 'F'), ('ESR_clamp', 'Ω')])
@@ -196,6 +202,24 @@ class _Schematic:
         return (x, y+1), (x, y-1)
 
 
+def _controller_box(s, p, y):
+    """Keep the reference away from power wires; no implied real IC pinout."""
+    from component_management import controller_reference, primary_mos_role
+    row = controller_reference(p)
+    if row is None:
+        return
+    item = p['component_management']['items']['U_CTRL']
+    name = ' '.join(str(item.get(k) or '').strip() for k in ('manufacturer', 'model')).strip()
+    s.refs.add('U_CTRL')
+    s.wire((.1, y-.7), (8.1, y-.7), (8.1, y+.7), (.1, y+.7), (.1, y-.7))
+    s.text(4.1, y+.3, 'U_CTRL · '+(name or '控制器型号待补充')[:58], fontsize=7.5,
+           bbox=dict(facecolor='white', edgecolor='none', pad=.2))
+    s.text(4.1, y-.24, '参考框：未展开引脚、驱动与偏置', fontsize=6.8)
+    if 'P-MOS' in primary_mos_role(p):
+        s.text(14.4, y, 'Q1 为 P-MOS；本图按幅值等效示意\n实物须按器件源漏极性及驱动设计',
+               fontsize=7, bbox=dict(facecolor='white', edgecolor='none', pad=.25))
+
+
 def draw_topology(ax, p, solved=None):
     """Draw all six supported circuits; return the displayed designators."""
     if p.get('outputs') or p.get('feedback_mode')=='PSR-MP6005':
@@ -204,7 +228,7 @@ def draw_topology(ax, p, solved=None):
     refs = {r['ref'] for r in components}
     topo = p['topology']
     isolated = topo in ('FLYBACK', 'QR-FLYBACK', 'ACF-FORWARD')
-    ax.clear(); ax.set_aspect('equal'); ax.set_xlim(-.4, 20.2); ax.set_ylim(-.25, 10.7)
+    ax.clear(); ax.set_aspect('equal'); ax.set_xlim(-.4, 20.2); ax.set_ylim(-2.5 if 'U_CTRL' in refs else -.25, 10.7)
     ax.set_axis_off()
     s = _Schematic(ax)
     s.refs.update(('J1', 'J2', 'R_LOAD'))
@@ -311,6 +335,7 @@ def draw_topology(ax, p, solved=None):
     s.text(19.2, .35, 'SGND' if isolated else 'GND')
     if isolated:
         s.text(6.2, .35, 'PGND')
+    _controller_box(s, p, -1.2)
     assert s.refs == refs, (s.refs-refs, refs-s.refs)
     return components
 
@@ -324,8 +349,12 @@ def isolated_components(p, solved=None):
     solved=compute_operating_point(p) if solved is None else solved
     q = dict(solved.get('aggregate_params',p),outputs=[],feedback_mode='SSR',feedback_output=1,
              coupling_config=dict(enabled=False))
+    q['component_management'] = p.get('component_management', {})
+    if p.get('feedback_mode') == 'PSR-MP6005':
+        q['component_management'] = dict(q['component_management'], items={
+            key:value for key,value in q['component_management'].get('items', {}).items() if key != 'U_CTRL'})
     old = topology_components(q,solved)
-    keep = {'J1','Q1','R_S1','T1','C_IN1','C_IN2','D_IN','Q2','C_CL1','D_SN1','R_SN1','C_SN1'}
+    keep = {'J1','Q1','R_S1','T1','C_IN1','C_IN2','D_IN','Q2','C_CL1','D_SN1','R_SN1','C_SN1','U_CTRL'}
     rows = [r for r in old if r['ref'] in keep or r['ref'].startswith('C_IN')]
     for r in rows:
         if r['ref']=='T1':
@@ -432,6 +461,7 @@ def draw_isolated(ax,p,solved=None):
         ax.text(18,-1.8,'U_FB · SSR：★ 路防反前取样；端口输出在防反后',ha='center',fontsize=8,color='#2068a0')
         ax.plot([19.3,19.3],[-1.3,yy],ls='--',color='#2068a0',lw=.8)
         ax.annotate('',xy=(19.3,yy),xytext=(19.3,yy-.75),arrowprops=dict(arrowstyle='->',color='#2068a0',lw=.8))
+    _controller_box(s, p, ground-2.)
     assert s.refs==refs,(s.refs-refs,refs-s.refs)
     return rows
 

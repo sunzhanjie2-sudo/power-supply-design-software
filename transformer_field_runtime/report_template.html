@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><link rel="icon" href="data:,"><title>$name · 变压器耦合仿真报告</title><style>$css</style></head>
+<body>
+<header class="mast"><div class="container mast-row">
+<div><p class="kicker">Elmer FEM <span>/</span> 线性磁静态分析</p><h1>$name <span>变压器耦合仿真报告</span></h1>
+<p class="subtitle">$classification <i>·</i> 求解于 <time>$finished</time><span class="print-meta"> · 报告 v$version · 出图于 $generated</span></p></div>
+<button class="print-button" type="button" onclick="window.print()">打印 / 保存 PDF</button></div></header>
+<nav aria-label="报告目录"><div class="container"><a href="#overview">结果概览</a><a href="#field">磁场与绕组</a><a href="#matrices">端口矩阵</a><a href="#checks">校核与输入</a></div></nav>
+<main class="container">
+<section id="overview"><div class="section-head"><h2>结果概览</h2><p>$nports 个端口 · $nsections 个物理段</p></div>
+<div class="metrics">$cards</div>
+<div class="panel"><div class="panel-heading"><h3>各端口与原边 $primary</h3><p>自感、互感均以 µH 计</p></div>
+<div class="scroll-table">$port_table</div></div>
+<p class="scope"><strong>$scope_title</strong> $scope_body</p></section>
+<section id="field"><div class="section-head"><h2>磁场与绕组</h2><p>$primary 通入 1 A · 其余端口 0 A</p></div>
+<figure class="panel"><div class="panel-heading"><h3>磁通密度与导线截面</h3><button type="button" data-figure="magnetic">放大磁场图</button></div>
+<img id="magnetic" alt="$field_alt" src="$field_image">
+<figcaption>$field_note</figcaption></figure>
+<figure class="panel"><div class="panel-heading"><h3>磁芯装配与绕组剖视</h3><button type="button" data-figure="geometry">放大装配图</button></div>
+<img id="geometry" alt="实际求解网格的完整装配，以及移去磁芯和前半圈后可见的各层等效线束" src="$model_image">
+<figcaption>$model_note</figcaption></figure>
+</section>
+<section id="matrices"><div class="section-head"><h2>完整端口矩阵</h2><p>行、列使用同一端口顺序</p></div>
+<div class="matrix-layout"><div class="panel matrix"><div class="panel-heading"><h3>自感与互感 <small>µH</small></h3></div>
+<div class="scroll-table">$ltable</div><p class="caption">对角为端口自感，其余为两个端口的带符号互感。</p></div>
+<div class="panel matrix"><div class="panel-heading"><h3>有符号耦合系数 <small>k</small></h3></div>
+<div class="scroll-table">$ktable</div><p class="caption">符号由端口同名端决定。比较耦合强弱时取绝对值。</p></div></div>
+</section>
+<section id="checks"><div class="section-head"><h2>校核与输入</h2><p>求解累计 $duration</p></div>
+<div class="panel"><div class="panel-heading"><h3>数值校核</h3></div><div class="facts">$checks</div></div>
+<div class="panel"><div class="panel-heading"><h3>本次模型</h3></div><div class="facts">$model_facts</div>
+<details><summary>查看分段绕向与串联接线</summary><div class="detail-content"><div class="scroll-table">$sections</div><ul>$connections</ul></div></details>
+<details><summary>查看输入来源、假设与适用范围</summary><div class="detail-content"><div class="facts">$sources</div><ul>$assumptions</ul></div></details></div>
+</section>
+<footer>离线报告 v$version · 生成于 $generated <span>矩阵文件使用 H，报告使用 µH。</span></footer>
+</main><dialog aria-labelledby="viewer-title"><div class="viewer-bar"><strong id="viewer-title"></strong><button type="button" id="close-view">关闭</button></div><div class="viewer-scroll"><img id="expanded" alt=""></div></dialog>
+<script>
+const viewer=document.querySelector('dialog');
+for(const button of document.querySelectorAll('[data-figure]')) button.addEventListener('click',()=>{
+  const source=document.getElementById(button.dataset.figure), expanded=document.getElementById('expanded');
+  expanded.src=source.src; expanded.alt=source.alt;
+  document.getElementById('viewer-title').textContent=source.closest('figure').querySelector('h3').textContent;
+  viewer.showModal(); document.getElementById('close-view').focus();
+});
+document.getElementById('close-view').addEventListener('click',()=>viewer.close());
+viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});
+let closedForScreen=[];
+window.addEventListener('beforeprint',()=>{closedForScreen=[...document.querySelectorAll('details:not([open])')];closedForScreen.forEach(d=>d.open=true)});
+window.addEventListener('afterprint',()=>closedForScreen.forEach(d=>d.open=false));
+</script></body></html>
+

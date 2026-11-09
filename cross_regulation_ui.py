@@ -10,22 +10,38 @@ class CrossRegulationUI:
         self._cross_result=None
         self._cross_progress_token=None
         self.cross_note=tk.StringVar(value='先在左侧设置各路最大/最小输出功率，再按需扫描；导出报告会自动扫描。旧文件最小值默认等于最大值，未假定轻载比例。')
-        ttk.Label(parent,textvariable=self.cross_note,wraplength=1050,justify='left').pack(fill='x',padx=8,pady=8)
+        note_frame=ttk.Frame(parent);note_frame.pack(fill='x',padx=8,pady=8)
+        note_text=tk.Text(note_frame,height=2,wrap='word',font=('Microsoft YaHei',11),relief='flat')
+        note_scroll=ttk.Scrollbar(note_frame,command=note_text.yview)
+        note_scroll.pack(side='right',fill='y')
+        note_text.configure(yscrollcommand=note_scroll.set)
+        note_text.pack(fill='x',expand=True)
+        def show_status(*_):
+            note_text.configure(state='normal');note_text.delete('1.0','end')
+            note_text.insert('1.0',self.cross_note.get());note_text.configure(state='disabled')
+        self.cross_note.trace_add('write',show_status);show_status()
         actions=ttk.Frame(parent);actions.pack(fill='x',padx=8)
         self.cross_button=ttk.Button(actions,text='扫描最小/最大负载组合',command=self._start_cross_regulation)
         self.cross_button.pack(side='left')
         ttk.Button(actions,text='取消扫描',command=self._cancel_cross_regulation).pack(side='left',padx=8)
+        body=ttk.Panedwindow(parent,orient='vertical')
         cols=('rail','ref','range','deviation','span','cross','min','max')
-        self.cross_tree=ttk.Treeview(parent,columns=cols,show='headings',height=6)
+        summary_frame=ttk.Frame(body)
+        body.add(summary_frame,weight=1)
+        self.cross_tree=ttk.Treeview(summary_frame,columns=cols,show='headings',height=3)
         for key,label,width in zip(cols,('输出','参考 / V','观察电压范围 / V','偏差范围 / %','包络跨度 / %','纯交叉跨度 / %','最低角点','最高角点'),(100,100,190,180,130,140,100,100)):
             self.cross_tree.heading(key,text=label);self.cross_tree.column(key,width=width,minwidth=70)
-        self.cross_tree.pack(fill='x',padx=8,pady=(8,0))
-        bar=ttk.Scrollbar(parent,orient='horizontal',command=self.cross_tree.xview);bar.pack(fill='x',padx=8)
+        summary_scroll=ttk.Scrollbar(summary_frame,command=self.cross_tree.yview)
+        summary_scroll.pack(side='right',fill='y')
+        self.cross_tree.configure(yscrollcommand=summary_scroll.set)
+        bar=ttk.Scrollbar(summary_frame,orient='horizontal',command=self.cross_tree.xview)
+        bar.pack(side='bottom',fill='x')
+        self.cross_tree.pack(fill='both',expand=True)
         self.cross_tree.configure(xscrollcommand=bar.set)
-        frame=ttk.Frame(parent);frame.pack(fill='both',expand=True,padx=8,pady=8)
-        cols=('id','vin','loads','voltages','state')
+        frame=ttk.Frame(body);body.add(frame,weight=3)
+        cols=('id','vin','loads','voltages','frequency','state')
         self.cross_cases=ttk.Treeview(frame,columns=cols,show='headings',height=6)
-        for key,label,width in zip(cols,('角点','Vin / V','各路设定负载 / W','各路解算直流电压 / V','状态'),(70,85,340,340,150)):
+        for key,label,width in zip(cols,('角点','Vin / V','各路设定负载 / W','各路解算直流电压 / V','实际频率 / Hz','状态'),(70,85,300,300,125,150)):
             self.cross_cases.heading(key,text=label);self.cross_cases.column(key,width=width,minwidth=65)
         self.cross_cases.grid(row=0,column=0,sticky='nsew')
         ybar=ttk.Scrollbar(frame,command=self.cross_cases.yview);ybar.grid(row=0,column=1,sticky='ns')
@@ -36,7 +52,6 @@ class CrossRegulationUI:
         detail_frame=ttk.Frame(parent)
         # Reserve a bounded, scrollable explanation area instead of allowing
         # a long model note to push the case table outside a small window.
-        frame.pack_forget()
         detail_frame.pack(side='bottom',fill='x',padx=8,pady=8)
         self.cross_detail_text=tk.Text(detail_frame,height=3,wrap='word',font=('Microsoft YaHei',11),relief='flat')
         detail_scroll=ttk.Scrollbar(detail_frame,command=self.cross_detail_text.yview)
@@ -50,8 +65,17 @@ class CrossRegulationUI:
             self.cross_detail_text.configure(state='disabled')
         self.cross_detail.trace_add('write',show_note)
         show_note()
-        frame.pack(fill='both',expand=True,padx=8,pady=8)
+        body.pack(fill='both',expand=True,padx=8,pady=8)
         self.cross_cases.bind('<<TreeviewSelect>>',self._select_cross_case)
+        # Status/model explanations scroll instead of pushing the table off
+        # a small viewport. Summaries retain every output through their scroll.
+        def fit_cross_view(event):
+            # Keep real corner rows reachable on a small window. All output
+            # summaries remain available through their own vertical scroll.
+            rows=1 if event.height<460 else 2 if event.height<650 else 3
+            if int(self.cross_tree.cget('height'))!=rows:
+                self.cross_tree.configure(height=rows)
+        parent.bind('<Configure>',fit_cross_view,add='+')
 
     def _mark_cross_regulation_stale(self):
         if not hasattr(self,'cross_note'):return
@@ -117,7 +141,8 @@ class CrossRegulationUI:
         for c in data['cases']:
             self.cross_cases.insert('','end',iid=c['id'],values=(c['id'],f'{c["V_in"]:g}',load_label(c),
                 '；'.join(f'OUT{i+1}={v:.5g}' for i,v in enumerate(c['voltages'])) if c['voltages'] else '未求解',
-                '已求解' if c['status']=='ok' else '未计算/失败'))
+                f'{c["f_sw"]:.5g}' if c.get('f_sw') else '—',
+                ('已求解；频率超限' if (c.get('qr_timing') or {}).get('design_frequency_limit_exceeded') else '已求解') if c['status']=='ok' else '未计算/失败'))
         self.cross_detail.set(data['note'])
 
     def _select_cross_case(self,_event=None):
@@ -127,3 +152,14 @@ class CrossRegulationUI:
         from cross_regulation import load_label
         self.cross_detail.set(f'{case["id"]} · Vin={case["V_in"]:g}V · '+load_label(case)+'\n'+
             (case['error'] or f'周期电流/电荷平衡已验证，归一化残差 {case["residual"]:.3g}；各路实际功率并不等于恒阻负载设定功耗。'))
+        if case.get('qr_timing'):
+            self.cross_detail.set(self.cross_detail.get()+'\nQR：'+
+                str(case['qr_timing'].get('timing_policy','矩阵退磁与离散谷底时序'))+
+                (f'；该角点实际频率 {case["f_sw"]:.6g} Hz。' if case.get('f_sw') else ''))
+            if case['qr_timing'].get('design_frequency_limit_exceeded'):
+                self.cross_detail.set(self.cross_detail.get()+f' 频率超过设计上限 {case["qr_timing"]["design_frequency_limit_hz"]:g} Hz，需调整硬件/控制或复核；数值收敛不表示选型合格。')
+            model=case['qr_timing']
+            if model.get('rcd_hardware'):
+                self.cross_detail.set(self.cross_detail.get()+f'\n固定RCD平均钳位 {model["clamp_voltage"]:.5g} V；'
+                    f'R={model["rcd_hardware"]["R_ohm"]:.5g} Ω，C={model["rcd_hardware"]["C_F"]:.5g} F；'
+                    f'Q/C相对纹波上界约 {model["rcd_ripple_upper_relative"]*100:.3g}%。')

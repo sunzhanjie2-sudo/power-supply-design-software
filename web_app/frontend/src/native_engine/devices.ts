@@ -30,13 +30,22 @@ export function forward(
   vf: number,
   average?: number,
 ) {
-  if (!curve)
+    if (!current.length || current.some((i) => typeof i !== "number" || !Number.isFinite(i)))
+      throw Error("二极管电流样本必须是非空有限数值");
+    current = current.map((i) => Math.max(0, i));
+    if (!curve) {
+      if (typeof vf !== "number" || !Number.isFinite(vf) || vf < 0)
+        throw Error("固定二极管 Vf 必须为有限非负数");
+      const forwardAverage = average ?? mean(current);
+      if (typeof forwardAverage !== "number" || !Number.isFinite(forwardAverage) || forwardAverage < 0)
+        throw Error("二极管正向平均电流必须为有限非负数");
     return {
       model: "fixed_vf",
-      P_cond: vf * (average ?? mean(current)),
+        P_cond: vf * forwardAverage,
       Vf: vf,
-      notes: ["固定压降估算"],
+        notes: ["固定 Vf × 正向平均电流；不叠加动态电阻项，反向样本不计导通损耗"],
     };
+    }
   const inverse = curve.points
       .map(([v, i]: number[]) => [i, v])
       .sort((a: number[], b: number[]) => a[0] - b[0]),
@@ -254,16 +263,51 @@ export function refs(p: Spec, id = 1) {
     : ["D1", "D2", "D_OUT"];
 }
 export function stress(op: Spec) {
+    let blocking =
+        op.topology === "ACF-FORWARD"
+          ? op.V_clamp
+          : (op.clamp?.V_plateau ?? op.V_sw_max / (1 + op.ring_margin)),
+      blockingSource = "",
+      blockingNote = "";
+    if (["BUCK", "BOOST", "BUCK-BOOST"].includes(op.topology)) {
+      if (op.niso_model) {
+        blocking = op.V_sw_max;
+        blockingSource = "periodic_actual_vds_envelope";
+        blockingNote =
+          "周期功率级实际 Vds 最大值，保守用于稳态阻断检查；包含模型内导通压降/输出低频纹波，未覆盖 Coss/ESL 等未建模尖峰。";
+      } else if (op.efficiency_model === "equivalent_output_burden") {
+        blocking =
+          op.topology === "BUCK"
+            ? op.V_in
+            : op.topology === "BOOST"
+              ? op.V_out_equiv
+              : op.V_in + op.V_out_equiv;
+        blockingSource = "legacy_topology_working_point";
+        blockingNote =
+          "旧等效工作点名义阻断平台；含人工裕量的原 Vds 包络另外保留，不当作已求解尖峰。";
+      } else {
+        blocking = op.V_sw_max;
+        blockingSource = "conservative_available_vds_maximum";
+        blockingNote =
+          "工作点未区分阻断平台与峰值，保守采用现有最大值，不反除未知裕量。";
+      }
+    }
   const sw = {
       I_rms: op.I_sw_rms,
       I_pk: op.I_sw_pk,
       I_avg: op.I_sw_avg,
       V_max: op.V_sw_max,
-      V_block:
-        op.topology === "ACF-FORWARD"
-          ? op.V_clamp
-          : (op.clamp?.V_plateau ?? op.V_sw_max / (1 + op.ring_margin)),
-      note: "MOS 电压应力须结合实测复核",
+        V_block: blocking,
+        ...(blockingSource
+          ? {
+              blocking_voltage_source: blockingSource,
+              blocking_voltage_note: blockingNote,
+              ...(blockingSource === "legacy_topology_working_point"
+                ? { V_recommended: op.V_sw_max }
+                : {}),
+            }
+          : {}),
+        note: "MOS 电压应力须结合实测复核" + (blockingNote ? "；" + blockingNote : ""),
     },
     di = {
       I_rms: op.I_d_rms,

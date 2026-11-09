@@ -113,7 +113,7 @@ def partial_transient_time(path):
         return None
 
 
-def _run(executable,folder,timeout,cancelled):
+def _run(executable,folder,timeout,cancelled,*,progress=None,simulation_end=None):
     from calculation_scheduler import CalculationCancelled
     folder=Path(folder).resolve()
     kwargs=dict(cwd=str(folder),stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
@@ -122,9 +122,21 @@ def _run(executable,folder,timeout,cancelled):
         kwargs.update(startupinfo=startup,creationflags=subprocess.CREATE_NO_WINDOW|subprocess.BELOW_NORMAL_PRIORITY_CLASS)
     process=subprocess.Popen([executable,'-b',str(folder/'Flyback.cir')],**kwargs)
     start=time.monotonic()
+    next_update=start
     try:
         while process.poll() is None:
             if cancelled():raise CalculationCancelled()
+            now=time.monotonic()
+            if progress and now>=next_update:
+                elapsed=now-start;next_update=now+1.
+                reached=partial_transient_time(folder/'Flyback.raw')
+                message=f'本阶段 {elapsed:.0f} s / 超时上限 {timeout:g} s'
+                if reached is not None:
+                    message+=f' · 已推进 {reached*1000:.3g} ms'
+                    if simulation_end and reached>0 and elapsed>5:
+                        remaining=max(0.,elapsed*(simulation_end/reached-1))
+                        message+=f' / {simulation_end*1000:g} ms，按当前速度尚需约 {remaining:.0f} s'
+                progress(message)
             if time.monotonic()-start>timeout:
                 reached=partial_transient_time(folder/'Flyback.raw')
                 detail=f'；瞬态约推进至 {reached*1000:.4g} ms' if reached is not None else ''
@@ -190,6 +202,115 @@ def _comparison_rows(case,measured,meta,periodicity=None,steady=None):
     return rows,ready
 
 
+def _simulate_nominal(executable,folder,case,meta,settings,record,cancelled,progress=None):
+    from calculation_scheduler import CalculationCancelled
+    from spice_analysis import cycle_quality,statistics
+    qr=meta.get('topology')=='QR-FLYBACK'
+    forward=meta.get('topology')=='ACF-FORWARD'
+    noniso=meta.get('topology') in ('BUCK','BOOST')
+    fault_case=record['fault_test']
+    if qr:
+        from qr_spice_analysis import cycle_quality
+    started=time.monotonic()
+    raw=None
+    try:
+        record['elapsed_s']=_run(executable,folder,settings['simulation_timeout_s'],cancelled,
+            progress=progress,simulation_end=settings['stop_ms']*1e-3)
+        measured,log,errors,warnings=read_log(folder/'Flyback.log')
+        raw=TransientRaw(folder/'Flyback.raw')
+        if noniso:
+            raw.names['i(lp)']=raw.names['i(l1)']
+            raw.names['i(ls1)']=raw.names['i(v_d1)']
+        if errors or not math.isclose(raw.time[-1],settings['stop_ms']*1e-3,abs_tol=1e-10):
+            raise ValueError('仿真未到结束时刻或日志存在求解失败：'+'; '.join(errors))
+        if qr:
+            from qr_spice_analysis import startup_gate_current
+            record['qr_startup']=startup_gate_current(raw,settings['step_ms']*1e-3,meta['resolved_controller']['VG'],
+                output_count=len(meta['hardware']['windings']),feedback_output=int(meta.get('feedback_output',1)))
+        required=['primary_rms','primary_peak','vds_peak','fault_max','input_voltage','frequency_actual','duty_avg']+[f'out{i}_before' for i in range(1,len(meta['hardware']['windings'])+1)]
+        missing = [k for k in required if k not in measured]
+        if missing:
+            from spice_analysis import protection_stop
+            record.update(measurements=measured,warnings=warnings,missing_measurements=missing,
+                          actual_end_s=float(raw.time[-1]),points=len(raw.time),nominal_comparable=False)
+            trip = protection_stop(raw, measured, meta['resolved_controller']['FSW'])
+            if trip:
+                record['protection_stop'] = trip
+                names = [f'v(out{i})' for i in range(1,len(meta['hardware']['windings'])+1)]
+                record['startup'] = raw.samples(names+['v(ss)','v(fault)'],0,float(raw.time[-1]),3000)
+                raise ValueError(f"保护在 {trip['first_trip_s']*1e3:.4g} ms 动作（{trip['cause']}）；"
+                                 f"测量窗占空比 {measured.get('duty_avg',float('nan')):.3g}，缺少 "+'、'.join(missing))
+            raise ValueError('未取得必要的测量：'+'、'.join(missing))
+        record.update(complete=True,measurements=measured,warnings=warnings,
+            actual_end_s=float(raw.time[-1]),points=len(raw.time))
+        frequency=meta['resolved_controller']['FSW']
+        record['periodicity']=cycle_quality(raw,frequency,settings['step_ms']*1e-3-400/frequency,
+            settings['step_ms']*1e-3-10/frequency,meta['resolved_controller']['VG'],tolerance_pct=settings['cycle_tolerance_pct'])
+        if forward:
+            from acf_spice import timing_quality
+            record['acf_timing']=timing_quality(raw,frequency,settings['step_ms']*1e-3-10/frequency,
+                meta['resolved_controller']['VG'],meta['hardware']['R_dc_p'])
+            if not record['acf_timing']['passed']:
+                record['periodicity'].update(stable=False,reason='有源钳位死区／磁复位检查未通过')
+        if qr and record['periodicity'].get('frequency_mean_hz'):
+            measured['frequency_actual']=record['periodicity']['frequency_mean_hz']
+            meta['qr_measured_min_frequency_hz']=record['periodicity']['frequency_min_hz']
+        if forward or noniso or (qr and len(meta['hardware']['windings']) > 1):
+            from spice_analysis import steady_quality
+            record['steady_before_step']=steady_quality(raw,frequency,settings['step_ms']*1e-3,len(meta['hardware']['windings']))
+        record['rows'],record['nominal_comparable']=_comparison_rows(case,measured,meta,record['periodicity'],record.get('steady_before_step'))
+        if fault_case:
+            for row in record['rows']:row.update(delta_percent=None,status='短路测试 不与标称判差')
+        names=['v(out'+str(i)+')' for i in range(1,len(meta['hardware']['windings'])+1)]
+        record['startup']=raw.samples(names+['v(ss)','v(fault)'],0,float(raw.time[-1]),3000)
+        end=settings['step_ms']*1e-3-10/frequency;begin=end-5/frequency
+        cycles=record['periodicity']['cycles']
+        if qr and cycles:
+            visible_cycles=cycles[-5:]
+            begin=visible_cycles[0]['start_s']
+            end=visible_cycles[-1]['end_s']
+        record['switching']=raw.samples(['v(drain)','v(sense)','v(gate)','v(comp)','v(ramp)','i(lp)']+(['v(zcd)'] if qr else [])+
+            (['v(sync)','v(auxgate)','v(aclamp)','v(vin_bus)','i(c_active)']+[f'i(lo{i})' for i in range(1,len(meta['hardware']['windings'])+1)] if forward else [])+
+            ['i(ls'+str(i)+')' for i in range(1,len(meta['hardware']['windings'])+1)]+
+            [f'v({node}{i})' for i in range(1,len(meta['hardware']['windings'])+1) for node in ('out','cap')],begin,end,2400)
+        if forward:
+            for i in range(1,len(meta['hardware']['windings'])+1):
+                key=f'i(ls{i})'
+                record['switching'][key]=(-np.asarray(record['switching'][key])).tolist()
+        wf=case['result']['wf'];sample_time=np.asarray(record['switching']['time'])
+        if qr or math.isclose(case['p']['f_sw'],meta['resolved_controller']['FSW']):
+            design_frequency=case['result']['op']['f_sw'] if qr else case['p']['f_sw']
+            origin=begin if qr and cycles else next(
+                (row['gate_rise_s'] for row in cycles if row.get('gate_rise_s') is not None),0.)
+            record['design_phase_origin_s']=origin
+            phase=np.mod(sample_time-origin,1/design_frequency)
+            # LP is a physical winding current, not magnetising current.
+            record['design_switching']={key:np.interp(phase,wf['t'],wf[source]).tolist()
+                for key,source in [('i_p','iL' if noniso else 'i_primary' if 'i_primary' in wf else 'i_p' if forward else 'i_sw'),('v_sw','v_sw')]}
+        record['branches']=[]
+        for i in range(1,len(meta['hardware']['windings'])+1):
+            child=wf['outputs'][i-1] if wf.get('outputs') else wf
+            branch=dict(id=i,name=(case['result']['outputs'][i-1]['name'] if case['result'].get('outputs') else 'OUT1'),
+                simulation_ripple=statistics(raw.time,raw.trace(f'v(out{i})'),settings['step_ms']*1e-3-200/frequency,settings['step_ms']*1e-3-10/frequency))
+            if qr or math.isclose(case['p']['f_sw'],frequency):
+                branch['design_current']=np.interp(phase,child['t'],child['i_s']).tolist()
+                branch['design_ripple']=np.interp(phase,child['t'],child['vout_ripple']).tolist()
+                branch['design_ripple_pp']=float(child['ripple_pp'])
+                if forward:
+                    branch['design_choke']=np.interp(phase,child['t'],child['iL']).tolist()
+                    child_op=case['result']['outputs'][i-1]['op'] if case['result'].get('outputs') else case['result']['op']
+                    branch.update(choke_design_rms=child_op['I_L_rms'],choke_design_peak=child_op['I_L_pk'],choke_design_valley=child_op['I_L_min'])
+            record['branches'].append(branch)
+        fault=raw.trace('v(fault)');indices=np.flatnonzero(np.diff((fault>.5).astype(np.int8))>0)
+        record['fault_events_s']=raw.time[indices+1].tolist()[:100]
+        record['source_model_hash']=meta['library_sha256']
+    except CalculationCancelled:raise
+    except Exception as exc:record.update(complete=False,error=str(exc))
+    finally:
+        record['wall_elapsed_s']=time.monotonic()-started
+        if raw is not None:raw.close()
+
+
 def compare_design(run,destination,*,cancelled=lambda:False,progress=None,executable=None):
     """Create a Word report plus an auditable ZIP. Never invent simulator data."""
     from spice_export import project_files,normalize_settings
@@ -211,14 +332,21 @@ def compare_design(run,destination,*,cancelled=lambda:False,progress=None,execut
     if forward:
         from acf_spice import MODEL_VERSION
     from spice_studies import run_fra,run_cross,collect_study
-    from spice_analysis import cycle_quality,statistics
+    from spice_analysis import cycle_quality,statistics,steady_quality
+    from spice_planning import execution_plan
+    from spice_result_cache import NominalCache,cache_key
     if qr:
         from qr_spice_analysis import cycle_quality
-    evidence=dict(schema='powerdesign-spice-comparison-2',model=MODEL_VERSION,cases=[],settings=settings,topology=p.get('topology'))
+    plan=execution_plan(p,settings)
+    evidence=dict(schema='powerdesign-spice-comparison-2',model=MODEL_VERSION,cases=[],settings=settings,topology=p.get('topology'),plan=plan)
+    from engineering_acceptance import input_fingerprint
+    evidence['input_fingerprint'] = input_fingerprint(p)
+    started=time.monotonic();cache=NominalCache()
+    processors=(_simulate_nominal,_comparison_rows,cycle_quality,statistics,steady_quality,TransientRaw.samples,TransientRaw.__init__)
     cases=[];seen=set()
     for case in bundle['cases']:
         if case['voltage'] not in seen:cases.append(case);seen.add(case['voltage'])
-    total=len(cases)*((2 if settings['short_test'] else 1)+int(settings['fra_enabled'])+int(settings['cross_enabled']))
+    total=len(cases)*((2 if settings['short_test'] else 1)+int(settings['fra_enabled'])+int(plan['cross_enabled']))
     with tempfile.TemporaryDirectory(prefix='spice-compare-',dir=destination.parent) as temporary:
         work=Path(temporary);archive_files={};done=0
         for case in cases:
@@ -246,81 +374,42 @@ def compare_design(run,destination,*,cancelled=lambda:False,progress=None,execut
                 if case['result']['op'].get('acf_model'):
                     cm=case['result']['op']['acf_model']
                     record['calculation_model']={key:cm[key] for key in ('kind','revision','assumptions','mesh','current_mesh_verified','normalized_residual','energy_balance_relative')}
-                raw=None
-                try:
-                    record['elapsed_s']=_run(executable,folder,settings['simulation_timeout_s'],cancelled)
-                    measured,log,errors,warnings=read_log(folder/'Flyback.log')
-                    raw=TransientRaw(folder/'Flyback.raw')
-                    if noniso:
-                        raw.names['i(lp)']=raw.names['i(l1)']
-                        raw.names['i(ls1)']=raw.names['i(v_d1)']
-                    if errors or not math.isclose(raw.time[-1],settings['stop_ms']*1e-3,abs_tol=1e-10):
-                        raise ValueError('仿真未到结束时刻或日志存在求解失败：'+'; '.join(errors))
-                    required=['primary_rms','primary_peak','vds_peak','fault_max','input_voltage','frequency_actual','duty_avg']+[f'out{i}_before' for i in range(1,len(meta['hardware']['windings'])+1)]
-                    if any(k not in measured for k in required):raise ValueError('必要的 .meas 数据缺失，不能生成有效对比')
-                    record.update(complete=True,measurements=measured,warnings=warnings,
-                        actual_end_s=float(raw.time[-1]),points=len(raw.time))
-                    frequency=meta['resolved_controller']['FSW']
-                    record['periodicity']=cycle_quality(raw,frequency,settings['step_ms']*1e-3-400/frequency,
-                        settings['step_ms']*1e-3-10/frequency,meta['resolved_controller']['VG'],tolerance_pct=settings['cycle_tolerance_pct'])
-                    if forward:
-                        from acf_spice import timing_quality
-                        record['acf_timing']=timing_quality(raw,frequency,settings['step_ms']*1e-3-10/frequency,
-                            meta['resolved_controller']['VG'],meta['hardware']['R_dc_p'])
-                        if not record['acf_timing']['passed']:
-                            record['periodicity'].update(stable=False,reason='有源钳位死区／磁复位检查未通过')
-                    if qr and record['periodicity'].get('frequency_mean_hz'):
-                        measured['frequency_actual']=record['periodicity']['frequency_mean_hz']
-                        meta['qr_measured_min_frequency_hz']=record['periodicity']['frequency_min_hz']
-                    if forward or noniso:
-                        from spice_analysis import steady_quality
-                        record['steady_before_step']=steady_quality(raw,frequency,settings['step_ms']*1e-3,len(meta['hardware']['windings']))
-                    record['rows'],record['nominal_comparable']=_comparison_rows(case,measured,meta,record['periodicity'],record.get('steady_before_step'))
-                    if fault_case:
-                        for row in record['rows']:row.update(delta_percent=None,status='短路测试 不与标称判差')
-                    names=['v(out'+str(i)+')' for i in range(1,len(meta['hardware']['windings'])+1)]
-                    record['startup']=raw.samples(names+['v(ss)','v(fault)'],0,float(raw.time[-1]),3000)
-                    end=settings['step_ms']*1e-3-10/meta['resolved_controller']['FSW'];begin=end-5/meta['resolved_controller']['FSW']
-                    record['switching']=raw.samples(['v(drain)','v(sense)','v(gate)','v(comp)','v(ramp)','i(lp)']+(['v(zcd)'] if qr else [])+
-                        (['v(sync)','v(auxgate)','v(aclamp)','v(vin_bus)','i(c_active)']+[f'i(lo{i})' for i in range(1,len(meta['hardware']['windings'])+1)] if forward else [])+
-                        ['i(ls'+str(i)+')' for i in range(1,len(meta['hardware']['windings'])+1)]+
-                        [f'v({node}{i})' for i in range(1,len(meta['hardware']['windings'])+1) for node in ('out','cap')],begin,end,2400)
-                    if forward:
-                        for i in range(1,len(meta['hardware']['windings'])+1):
-                            key=f'i(ls{i})'
-                            record['switching'][key]=(-np.asarray(record['switching'][key])).tolist()
-                    wf=case['result']['wf'];sample_time=np.asarray(record['switching']['time'])
-                    if qr or math.isclose(case['p']['f_sw'],meta['resolved_controller']['FSW']):
-                        design_frequency=case['result']['op']['f_sw'] if qr else case['p']['f_sw']
-                        origin=record['periodicity']['cycles'][0]['start_s'] if qr and record['periodicity']['cycles'] else 0.
-                        phase=np.mod(sample_time-origin,1/design_frequency)
-                        # LP is a physical winding current, not magnetising current.
-                        record['design_switching']={key:np.interp(phase,wf['t'],wf[source]).tolist()
-                            for key,source in [('i_p','iL' if noniso else 'i_primary' if 'i_primary' in wf else 'i_p' if forward else 'i_sw'),('v_sw','v_sw')]}
-                    record['branches']=[]
-                    for i in range(1,len(meta['hardware']['windings'])+1):
-                        child=wf['outputs'][i-1] if wf.get('outputs') else wf
-                        branch=dict(id=i,name=(case['result']['outputs'][i-1]['name'] if case['result'].get('outputs') else 'OUT1'),
-                            simulation_ripple=statistics(raw.time,raw.trace(f'v(out{i})'),settings['step_ms']*1e-3-200/frequency,settings['step_ms']*1e-3-10/frequency))
-                        if qr or math.isclose(case['p']['f_sw'],frequency):
-                            branch['design_current']=np.interp(phase,child['t'],child['i_s']).tolist()
-                            branch['design_ripple']=np.interp(phase,child['t'],child['vout_ripple']).tolist()
-                            branch['design_ripple_pp']=float(child['ripple_pp'])
-                            if forward:
-                                branch['design_choke']=np.interp(phase,child['t'],child['iL']).tolist()
-                                child_op=case['result']['outputs'][i-1]['op'] if case['result'].get('outputs') else case['result']['op']
-                                branch.update(choke_design_rms=child_op['I_L_rms'],choke_design_peak=child_op['I_L_pk'],choke_design_valley=child_op['I_L_min'])
-                        record['branches'].append(branch)
-                    fault=raw.trace('v(fault)');indices=np.flatnonzero(np.diff((fault>.5).astype(np.int8))>0)
-                    record['fault_events_s']=raw.time[indices+1].tolist()[:100]
-                    record['source_model_hash']=meta['library_sha256']
-                except CalculationCancelled:raise
-                except Exception as exc:record.update(complete=False,error=str(exc))
-                finally:
-                    if raw is not None:raw.close()
-                    if (folder/'Flyback.log').is_file():archive_files[label+'/Flyback.log']=(folder/'Flyback.log').read_bytes()
+                key=None;cached=None
+                if settings['simulation_reuse'] and not fault_case:
+                    try:
+                        key=cache_key(files,case,settings,executable,processors)
+                        cached=cache.load(key)
+                    except (ValueError,TypeError,OSError):pass
+                if cached is not None:
+                    cached_record,log,created_at=cached
+                    record.update(cached_record,id=label)
+                    record['cache']=dict(hit=True,created_at=created_at,key=key)
+                    record['wall_elapsed_s']=0.
+                    archive_files[label+'/Flyback.log']=log
+                    if progress:progress(done,total,label+' · 复用已通过的标称仿真 '+created_at)
+                else:
+                    _simulate_nominal(executable,folder,case,meta,settings,record,cancelled,
+                        progress=lambda text:progress(done,total,label+' · '+text) if progress else None)
+                    record['cache']=dict(hit=False)
+                    if record.get('complete') and record.get('nominal_comparable') and not fault_case:
+                        from flyback_cap_boundary import attach_comparison
+                        attach_comparison(case['p'],case['result']['op'],record,cancelled)
+                    if (folder/'Flyback.log').is_file():
+                        log=(folder/'Flyback.log').read_bytes()
+                        archive_files[label+'/Flyback.log']=log
+                        if key and not cancelled():cache.store(key,record,log)
                 if fault_case:continue
-                def execute(study_folder,timeout):return _run(executable,study_folder,timeout,cancelled)
+                phase=[case['id']+' 环路 FRA']
+                def phase_progress(message):
+                    phase[0]=case['id']+' '+message
+                    if progress:progress(done,total,phase[0])
+                def execute(study_folder,timeout):
+                    analysis=(study_folder/'analysis.inc').read_text(encoding='ascii')
+                    stop_match=re.search(r'(?im)^\.tran\s+\S+\s+([\d.eE+-]+)\s',analysis)
+                    simulation_end=float(stop_match[1]) if stop_match else None
+                    return _run(executable,study_folder,timeout,cancelled,
+                        progress=lambda text:progress(done,total,phase[0]+' · '+text) if progress else None,
+                        simulation_end=simulation_end)
                 if settings['fra_enabled']:
                     done+=1
                     if progress:progress(done,total,'LTspice '+case['id']+' 原生 FRA')
@@ -329,25 +418,33 @@ def compare_design(run,destination,*,cancelled=lambda:False,progress=None,execut
                         operating_point=None
                         if qr:
                             from spice_studies import qr_measured_point
+                            # Restore the measured frequency boundary for a
+                            # reused QR record as well as a fresh RAW result.
+                            meta['qr_measured_min_frequency_hz']=record['periodicity']['frequency_min_hz']
                             operating_point=qr_measured_point(case,record)
                         record['loop']=run_fra(files,case,meta,settings,study,execute,
-                            progress=lambda message:progress(done,total,case['id']+' '+message) if progress else None,
+                            progress=phase_progress,
                             operating_point=operating_point)
                         if study.is_dir():archive_files.update(collect_study(study,study.name))
                         if (study/'half_amplitude').is_dir():archive_files.update(collect_study(study/'half_amplitude',study.name+'/half_amplitude'))
                     else:record['loop']['error']='标称工况未通过逐周期与直流稳态检查，不提供有效线性化 FRA'
-                if settings['cross_enabled']:
+                if plan['cross_enabled']:
                     done+=1
-                    if progress:progress(done,total,'LTspice '+case['id']+' 交叉调整率角点')
+                    phase_progress('交叉调整率角点')
                     study=work/(case['id']+'_交叉调整率')
-                    record['cross']=run_cross(files,case,meta,settings,study,execute,cancelled=cancelled,
-                        progress=lambda message:progress(done,total,case['id']+' '+message) if progress else None)
+                    if not record.get('nominal_comparable'):
+                        record['cross']=dict(supported=True,complete=False,records=[],summary=[],
+                            error='标称工况未完成或未通过稳态／逐周期检查，暂停负载角点扫描；请先调整观察时间或控制器。')
+                    else:
+                        record['cross']=run_cross(files,case,meta,settings,study,execute,cancelled=cancelled,
+                            progress=phase_progress)
                     if study.is_dir():archive_files.update(collect_study(study,study.name))
                     for retry in study.glob('retry_*'):
                         if retry.is_dir():archive_files.update(collect_study(retry,study.name+'/'+retry.name))
         if cancelled():raise CalculationCancelled()
         from spice_comparison_report import write_report
         pending_report=work/'comparison.docx'
+        evidence['simulation_wall_s']=time.monotonic()-started
         archive_files['comparison.json']=json.dumps(evidence,ensure_ascii=False,allow_nan=False,indent=2).encode('utf-8')
         try:write_report(pending_report,evidence)
         except Exception as exc:
@@ -366,9 +463,14 @@ def compare_design(run,destination,*,cancelled=lambda:False,progress=None,execut
     fra_success=sum(c['loop'].get('available',False) for c in nominal)
     cross_cases=[c for c in nominal if c['cross'].get('supported')]
     cross_success=sum(c['cross'].get('complete',False) for c in cross_cases)
+    cross_simulation_success=sum(c['cross'].get('simulation_complete',c['cross'].get('complete',False)) for c in cross_cases)
+    cross_design_success=sum(c['cross'].get('design_complete',c['cross'].get('complete',False)) for c in cross_cases)
     return dict(path=str(zip_path),report_path=str(report_path),successful=sum(c['complete'] for c in evidence['cases']),
         total=len(evidence['cases']),fra_successful=fra_success,fra_total=len(nominal) if settings['fra_enabled'] else 0,
         cross_successful=cross_success,cross_total=len(cross_cases),
-        incomplete=any(not c['complete'] for c in evidence['cases']) or
+        cross_simulation_successful=cross_simulation_success,cross_design_successful=cross_design_success,
+        cached_nominal=sum(c.get('cache',{}).get('hit',False) for c in nominal),
+        elapsed_s=time.monotonic()-started,
+        incomplete=any(not c['complete'] for c in evidence['cases']) or any(not c.get('nominal_comparable',False) for c in nominal) or
             bool(settings['fra_enabled'] and fra_success<len(nominal)) or
             bool(settings['cross_enabled'] and cross_success<len(cross_cases)))

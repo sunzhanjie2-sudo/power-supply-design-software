@@ -1,0 +1,120 @@
+{
+  "schema": "power-design.field-runtime.sources.v1",
+  "upstream_project": "变压器耦合参数提取工具",
+  "upstream_package": "coupling_tool",
+  "upstream_version": "0.1.2",
+  "copied_at": "2026-11-07",
+  "files": [
+    {
+      "path": "__init__.py",
+      "source_sha256": "b9e01b611128c68d8e414bd96831e95a7616f8f3ad322e47852dd36710c21d11",
+      "bundled_sha256": "b9e01b611128c68d8e414bd96831e95a7616f8f3ad322e47852dd36710c21d11",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "configuration.py",
+      "source_sha256": "23152f2627c248074fe6890bac6e87b65799d53d3fb3be1a5f71c573f594c8b4",
+      "bundled_sha256": "9813ad2dabf1042c8825b026d560ace87892c9fb2786f05f34e38de1db6b3e04",
+      "modification": "Elmer detection uses supplied ELMER_HOME only; remove machine-specific D: fallback."
+    },
+    {
+      "path": "contract_v1.py",
+      "source_sha256": "732816c01939d7e889ddcc17e96c14f258b1edf919b082d741336619bed3cffa",
+      "bundled_sha256": "732816c01939d7e889ddcc17e96c14f258b1edf919b082d741336619bed3cffa",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "field_figures.py",
+      "source_sha256": "8c60061e085c19f33631ae2e5ec2b6601563efdea59c2bcc51c39dbd2332b2dd",
+      "bundled_sha256": "d5b026d42327469ba3ec9b5f794e45d3cf8c19b6b145437b8fb8a9ea4128434b",
+      "modification": "Resolve Windows fonts through WINDIR rather than fixed system drive."
+    },
+    {
+      "path": "geometry_semantics.py",
+      "source_sha256": "76162d939b9291c03a5fe52519628070dcb71d362b5c528b5a6532ecaca5fe35",
+      "bundled_sha256": "76162d939b9291c03a5fe52519628070dcb71d362b5c528b5a6532ecaca5fe35",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "meshing.py",
+      "source_sha256": "bf74bcd5bf6af0d123f8325f889cbdc3db09fc5066d96ea851a552b31b4a5675",
+      "bundled_sha256": "bf74bcd5bf6af0d123f8325f889cbdc3db09fc5066d96ea851a552b31b4a5675",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "package.py",
+      "source_sha256": "72114e8432eb59d0f3465163315beb9527c8fd89d3c43c511a1d3baafcfba7e5",
+      "bundled_sha256": "72114e8432eb59d0f3465163315beb9527c8fd89d3c43c511a1d3baafcfba7e5",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "pipeline.py",
+      "source_sha256": "f86b05307abb3e12c7822a09aceecf96c559bbfcbce96a756e472ea7af171855",
+      "bundled_sha256": "f86b05307abb3e12c7822a09aceecf96c559bbfcbce96a756e472ea7af171855",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "presentation.py",
+      "source_sha256": "d3ba7e058d0cffd6a62ae9f0d0c955cd49f080c99d1f232e7bc44b42998f486e",
+      "bundled_sha256": "d3ba7e058d0cffd6a62ae9f0d0c955cd49f080c99d1f232e7bc44b42998f486e",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "report_style.css",
+      "source_sha256": "d2b9b1f60605685076746c861282d980de50dc066e3ed13678bd9c18a81f4502",
+      "bundled_sha256": "d2b9b1f60605685076746c861282d980de50dc066e3ed13678bd9c18a81f4502",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "report_template.html",
+      "source_sha256": "22ad3d73388bfe7f75e81778dd03e93ec986ef23c39a3af060581eeeae58b6e8",
+      "bundled_sha256": "22ad3d73388bfe7f75e81778dd03e93ec986ef23c39a3af060581eeeae58b6e8",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "reporting.py",
+      "source_sha256": "80a8aba088b397b7f69067d755ad1e4df9e9175908597e1dc40a75726a8929f3",
+      "bundled_sha256": "80a8aba088b397b7f69067d755ad1e4df9e9175908597e1dc40a75726a8929f3",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "runtime.py",
+      "source_sha256": "0b455beb6f660ef34dbed51731fada08054d261764b916e87d4cb3a8dda93a0a",
+      "bundled_sha256": "0b455beb6f660ef34dbed51731fada08054d261764b916e87d4cb3a8dda93a0a",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "sif_writer.py",
+      "source_sha256": "a3a90ed5aaabd546f1be53d2d06170916c5de2ff94c8648ef1bf0c4d9abf6ed3",
+      "bundled_sha256": "a3a90ed5aaabd546f1be53d2d06170916c5de2ff94c8648ef1bf0c4d9abf6ed3",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "solving.py",
+      "source_sha256": "815974be8e68d4e979b04acae30966d979669616e97f0c2838ef638f74476fad",
+      "bundled_sha256": "815974be8e68d4e979b04acae30966d979669616e97f0c2838ef638f74476fad",
+      "modification": "Unmodified source copy."
+    },
+    {
+      "path": "storage.py",
+      "source_sha256": "3542ac2023374d0a3547290a7088aecf2539460d2b65907311c9fa2038676adb",
+      "bundled_sha256": "303951a1ab863ee11733ca7e389a099ba4daf725a28056833d9359996c71c008",
+      "modification": "Use per-task POWER_DESIGN_FIELD_WORKDIR or temporary cache, never installation directory."
+    },
+    {
+      "path": "vendor-provenance.json",
+      "source_sha256": "b9f4224d5a6e6261eb722916057e21ac866c5ebf41dd25a3f7632e2bbdac82b3",
+      "bundled_sha256": "b9f4224d5a6e6261eb722916057e21ac866c5ebf41dd25a3f7632e2bbdac82b3",
+      "modification": "Unmodified source copy."
+    }
+  ],
+  "excluded": [
+    "GUI",
+    "user data",
+    "CAD models",
+    "results",
+    "external Python environment"
+  ],
+  "runtime_entry": "field_worker.py",
+  "physical_model_changed": false
+}

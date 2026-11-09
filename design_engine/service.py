@@ -93,10 +93,11 @@ def validate_spec(spec: dict[str, Any]) -> dict[str, Any]:
 
 def _provenance(spec):
     root = Path(__file__).resolve().parents[1]
-    names = ('capacitor_banks.py','power_stage.py', 'loss_model.py', 'semiconductor.py', 'magnetics.py',
-             'waveforms.py', 'capripple.py', 'plants.py', 'loop_tuning.py',
-             'design_checks.py', 'isolated_outputs.py', 'coupled_flyback.py',
-             'winding_coupling.py', 'transformer_turns.py', 'voltage_nodes.py', 'custom_cores.py',
+    names = ('capacitor_banks.py','power_stage.py', 'loss_model.py', 'semiconductor.py', 'magnetics.py', 'inductor_selection.py',
+             'waveforms.py', 'capripple.py', 'plants.py', 'qr_loop.py', 'loop_tuning.py',
+             'design_checks.py', 'isolated_outputs.py', 'coupled_flyback.py', 'qr_coupled.py',
+             'winding_coupling.py', 'winding_layout.py', 'transformer_geometry.py', 'transformer_geometry_contract.py',
+             'transformer_turns.py', 'transformer_gap.py', 'voltage_nodes.py', 'custom_cores.py',
              'input_voltage_range.py', 'analysis_workflows.py', 'flyback_clamp.py',
              'active_clamp.py', 'mp6005.py', 'multi_output_loop.py', 'output_capacitors.py', 'cross_regulation.py',
              'diode_curves.py', 'mos_curves.py', 'mos_gate_charge.py', 'mos_gate.py',
@@ -134,12 +135,22 @@ def prepare_endpoint_bundle(parameters: dict[str, Any], *, cancelled: CancelCall
     bundle = calculate_input_endpoints(copy.deepcopy(parameters), include_loop=include_loop,
         include_cross_regulation=include_cross_regulation, cancelled=cancel, progress=progress)
     if include_efficiency:
+        from calculation_scheduler import parameter_signature
+        from mos_manual import distinct_endpoints
+        efficiency_curves = {}
         for case in bundle['cases']:
             if cancel():
                 raise CalculationCancelled()
             if case.get('result') is not None and not case.get('error'):
-                case['efficiency_curve'] = calculate_report_efficiency_curve(
-                    dict(p=case['p'], coupled=bool(case['result']['op'].get('coupled_model'))), cancel)
+                electrical = dict(case['p'])
+                if not distinct_endpoints(electrical):
+                    electrical.pop('input_voltage_case', None)
+                coupled = bool(case['result']['op'].get('coupled_model'))
+                key = (parameter_signature(electrical), coupled)
+                if key not in efficiency_curves:
+                    efficiency_curves[key] = calculate_report_efficiency_curve(
+                        dict(p=case['p'], coupled=coupled), cancel)
+                case['efficiency_curve'] = copy.deepcopy(efficiency_curves[key])
     if cancel():
         raise CalculationCancelled()
     return bundle

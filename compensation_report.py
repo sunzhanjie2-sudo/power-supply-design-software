@@ -42,6 +42,14 @@ def network_key(label):
     raise ValueError('无法识别当前补偿参考网络。')
 
 
+def opamp_command_scale(p, key):
+    """Physical EA output -> modeled PWM command, for the LM5022 op-amp network."""
+    if key=='opamp3' and p.get('topology')=='BOOST' and p.get('spice_config',{}).get('niso_profile')==3:
+        from nonisolated import profile
+        return profile(p)['scale']
+    return 1.
+
+
 def compensation_snapshot(p, op, state):
     """Recompute from the current fields, not from the last clicked result."""
     if not state:
@@ -65,11 +73,13 @@ def compensation_snapshot(p, op, state):
     controller_type=resolve_controller_type(p.get('controller_type','auto'),p.get('control_mode','Voltage Mode'))
     exact_type2=not reverse and controller_type=='type2' and not type2
     vout = float(op.get('V_feedback',op.get('V_out_cap',op['V_out'])))
-    args = [targets[k] for k in ('KP','wz1','wz2','wp1','wp2')]
+    command_scale = opamp_command_scale(p,key)
+    pin_kp = targets['KP']/command_scale
+    args = [pin_kp]+[targets[k] for k in ('wz1','wz2','wp1','wp2')]
     if reverse:
         parts = dict(inputs)
     elif exact_type2:
-        parts = compd.type2_network_solve(key,targets['KP'],targets['wz1'],targets['wp1'],inputs,Vout=vout)
+        parts = compd.type2_network_solve(key,pin_kp,targets['wz1'],targets['wp1'],inputs,Vout=vout)
     elif key == 'opamp3':
         parts = compd.opamp_type3_solve(*args, inputs['R1'], type2=type2)
         parts['Vref'] = inputs['Vref']
@@ -97,6 +107,9 @@ def compensation_snapshot(p, op, state):
         controller_type='type2'
         exact_type2=True
     notes = [note.replace('④页','⑤页') for note in parts.get('warnings', [])]
+    if command_scale != 1.:
+        notes.append(f"LM5022 实际 COMP 网络 KP 为 {realized['KP']:.5g}。COMP 至 CS 的小信号增益为 1/3，回代至环路页的 KP 按比较器指令计。")
+        realized['KP'] *= command_scale
     if exact_type2:
         notes.append('按⑤页二型实现：原点极点、fz1零点、fp1高频极点；未使用fz2/fp2，不用远端零极点近似抵消。')
         if key=='gm3' and not inputs.get('R1u'):
@@ -134,7 +147,7 @@ def compensation_snapshot(p, op, state):
                 exact_type2=exact_type2,legacy_type2=type2,controller_type=controller_type,
                 active_fields=('KP','wz1','wp1') if controller_type=='type2' else ('KP','wz1','wz2','wp1','wp2'),
                 inputs=inputs, parts=parts, targets=targets, realized=realized,
-                buildable=buildable, notes=notes)
+                buildable=buildable, notes=notes, command_scale=command_scale)
 
 
 def snapshot_lines(data):
@@ -195,6 +208,9 @@ def _equations(doc, data):
         formulas = ['C1=1/(ωz₁·R1)', 'R_LED=CTR·Rpullup/(KP·R1·C1)',
                     'ωz₂=1/[(R_LED+R_pz)C_pz]', 'ωp₁=1/(R_pz·C_pz)',
                     'C2=1/(ωp₂·Rpullup)-Copto']
+    if data.get('command_scale',1.) != 1.:
+        equation(doc,'Kpin=3·KP')
+        formulas = [f if f.startswith('Gc(s)') else f.replace('KP','Kpin') for f in formulas]
     for formula in formulas: equation(doc, formula)
     if 'R_lower' in parts:
         equation(doc, 'Rlower=R1·Vref/(Vo-Vref)')

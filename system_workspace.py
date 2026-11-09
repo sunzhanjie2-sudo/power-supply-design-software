@@ -174,7 +174,10 @@ def save_project(project, path):
 
 
 def load_project(path):
-    value = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    return load_project_data(json.loads(Path(path).read_text(encoding='utf-8-sig')))
+
+
+def load_project_data(value):
     if value.get('schema')=='power.ldo-result/1':value=value['spec']
     return normalize_project(value if value.get('schema_version') in (SCHEMA, 'pcs.aux-workspace/1') else fresh_project(value))
 

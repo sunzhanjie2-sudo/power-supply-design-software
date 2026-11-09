@@ -1,4 +1,4 @@
-"""Endpoint Word report keeps one hardware design and two complete cases."""
+"""Endpoint Word report keeps complete data paired by engineering module."""
 import copy
 import json
 from pathlib import Path
@@ -62,14 +62,32 @@ class RangeReportChecks(unittest.TestCase):
         self.assertEqual(snap['base_spec'],saved)
         doc=Document(path); body=text(doc)
         self.assertEqual(sum(p.style.name=='Title' for p in doc.paragraphs),1)
-        self.assertIn('同一组补偿参数', '\n'.join(c.text for t in doc.tables for r in t.rows for c in r.cells))
+        self.assertIn('同一套已确定硬件与补偿',body)
+        for title in ('需求与共同硬件','功率级与开关过程','器件选型与损耗',
+                      '电容分流与输出纹波','磁件设计与绕制','环路与反馈补偿','输入参数与追溯'):
+            self.assertIn(title,body)
+        self.assertEqual(outcome['report_architecture'],'module-paired-v1')
         for label in ('Vinmin','Vinmax'):
-            for title in ('0  拓扑','1  工作点','2  关键时域','3  功率器件','4  电容组',
-                          '5  磁件','6  环路','6.1  补偿电路参数','8  损耗','附录 A'):
-                self.assertIn('['+label+'] '+title,body)
-            self.assertIn('['+label+'] 图 4-1',body)
+            self.assertIn(label,'\n'.join(c.text for t in doc.tables for r in t.rows for c in r.cells))
+        self.assertNotIn('[Vinmin] 0  拓扑',body)
+        self.assertNotIn('[Vinmax] 0  拓扑',body)
         self.assertNotIn('自动选芯 / 匝数会在每个负载点重新设计',body)
-        self.assertGreaterEqual(len(doc.element.xpath('.//m:oMath')),20)
+        # Shared formulae appear once. Verify their content against the full
+        # single-case author, rather than require the old duplicated count.
+        from io import BytesIO
+        from PIL import Image
+        from report_xlsx import _math_text
+        tiny=BytesIO();Image.new('RGB',(4,4),'white').save(tiny,format='PNG')
+        expected=set()
+        with patch('report_docx._chart',return_value=tiny.getvalue()):
+            for case in snap['cases']:
+                reference=Document();r=case['result']
+                export_design_docx('',case['p'],r['op'],r['wf'],r,document=reference,save=False,
+                    efficiency_curve=case['efficiency_curve'],compensation_state=state)
+                expected.update(_math_text(node) for node in reference.element.xpath('.//m:oMath'))
+        actual={_math_text(node) for node in doc.element.xpath('.//m:oMath')}
+        self.assertGreaterEqual(len(actual),10)
+        self.assertTrue(expected<=actual,expected-actual)
         self.assertEqual(outcome['figure_count'],len(doc.inline_shapes))
         # python-docx assigns relationship/figure identities in the same part;
         # neither endpoint can overwrite the other's images or captions.
@@ -92,9 +110,9 @@ class RangeReportChecks(unittest.TestCase):
         out=export_input_range_docx(path,snap)
         self.assertTrue(out['incomplete']); self.assertEqual(out['failed_cases'],['Vinmax'])
         body=text(Document(path))
-        self.assertIn('本报告计算不完整',body)
+        self.assertIn('计算不完整',body)
         self.assertIn('测试角点不能收敛',body)
-        self.assertIn('[Vinmax] 完整核算不可用',body)
+        self.assertIn('Vinmax 本工况不可用',body)
         self.assertNotIn('[Vinmax] 2  关键时域',body)
 
     def test_equal_endpoints_keep_both_labeled_complete_sections(self):
@@ -106,8 +124,7 @@ class RangeReportChecks(unittest.TestCase):
         with patch('input_range_report.export_design_docx',return_value=dict(checks=1,needs_review=0)) as append:
             out=export_input_range_docx(OUT/'相同输入端点报告.docx',snap)
         self.assertEqual(append.call_count,2)
-        self.assertIs(append.call_args_list[0].kwargs['document'],append.call_args_list[1].kwargs['document'])
-        self.assertEqual([c.kwargs['case_label'] for c in append.call_args_list],['Vinmin','Vinmax'])
+        self.assertIsNot(append.call_args_list[0].kwargs['document'],append.call_args_list[1].kwargs['document'])
         self.assertTrue(all(not c.kwargs['save'] for c in append.call_args_list))
         self.assertFalse(out['incomplete'])
 
@@ -121,15 +138,15 @@ class RangeReportChecks(unittest.TestCase):
             type2=False,vars=dict(R1=dict(v=40.,u='k'),CTR=dict(v=1.,u=''),
                                   Rpullup=dict(v=20.,u='k'),Copto=dict(v=.1,u='n'))))
         doc=Document(output); body=text(doc)
-        self.assertEqual(len([t for t in doc.tables if t.cell(0,0).text=='电容']),2)
-        for label in ('Vinmin','Vinmax'):
-            for group in ('共享输入','OUT1','OUT2','OUT3'):
-                self.assertEqual(sum('['+label+'] 图 4-' in p.text and group+' 电容 FFT 分带（仅列一次）' in p.text for p in doc.paragraphs),1)
+        self.assertEqual(len([t for t in doc.tables if t.cell(0,0).text=='电容']),1)
+        for group in ('共享输入','OUT1','OUT2','OUT3'):
+            self.assertEqual(sum('图 4-' in p.text and group+' 电容 FFT 分带（仅列一次）' in p.text for p in doc.paragraphs),1)
         self.assertNotIn('图 1-C1',body)
         self.assertEqual(out['successful_cases'],2)
-        requirements=doc.tables[0]
-        demand=next(row.cells[1].text for row in requirements.rows if row.cells[0].text=='总输出功率 / 频率设定')
-        self.assertTrue(demand.startswith('40 W / '),demand)
+        demand=next(row.cells[1].text for t in doc.tables for row in t.rows
+                    if row.cells[0].text=='总功率 / 主反馈路电流')
+        self.assertIn('40 W / ',demand)
+        self.assertNotIn('123 W',demand)
         print('Multi-output report QA:',output)
 
     def test_partial_magnetics_and_two_failed_cases_do_not_claim_validation_passed(self):
@@ -138,14 +155,14 @@ class RangeReportChecks(unittest.TestCase):
             out=export_input_range_docx(OUT/'磁件部分结果报告.docx',snap)
         body=text(Document(out['path']))
         self.assertTrue(out['incomplete']); self.assertFalse(out['hardware_fixed'])
-        self.assertIn('本报告为部分计算结果',body)
+        self.assertIn('硬件未闭合',body)
         self.assertIn('测试磁件选型失败',body)
         both=dict(snap,cases=[dict(case,result=None,error='测试计算失败',checks=[])
                              for case in snap['cases']])
         out=export_input_range_docx(OUT/'两个端点失败报告.docx',both)
         body=text(Document(out['path']))
         self.assertEqual(out['successful_cases'],0)
-        self.assertIn('没有完整的双端点核查结果',body)
+        self.assertIn('计算不完整',body)
         self.assertNotIn('检查均未出现需复核',body)
 
     def test_invalid_case_identity_is_rejected(self):

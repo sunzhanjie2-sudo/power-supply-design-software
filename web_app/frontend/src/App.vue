@@ -6,15 +6,18 @@ import OutputEditor from "./OutputEditor.vue";
 import CurveImporter from "./CurveImporter.vue";
 import ChartPanel from "./ChartPanel.vue";
 import CoreEditor from "./CoreEditor.vue";
+import MagneticReport from "./MagneticReport.vue";
 import ResultTable from "./ResultTable.vue";
 import CapacitorTable from "./CapacitorTable.vue";
 import CapacitorBank from "./CapacitorBank.vue";
 import AdvancedTools from "./AdvancedTools.vue";
 import WindingEditor from "./WindingEditor.vue";
+import TransformerGeometry from "./TransformerGeometry.vue";
 import CurvePlot from "./CurvePlot.vue";
 import ComponentManager from "./ComponentManager.vue";
 import ControllerLogic from "./ControllerLogic.vue";
 import ParasiticEditor from "./ParasiticEditor.vue";
+import InitialDesign from "./InitialDesign.vue";
 import { request, post, getBlob, download, setToken } from "./api";
 import { FONT_SIZES, normalizeFontSize } from "./ui-font";
 import type {
@@ -50,6 +53,7 @@ const meta = ref<Bootstrap | null>(null),
   spec = ref<Spec>({}),
   preview = ref<Preview | null>(null);
 const spiceFocus = ref('frequency_hz');
+let geometrySource:{name:string;text:string}|null=null;
 const spiceOptions = computed(()=>(meta.value?.spice_options || []).filter(item=>item.topologies.includes(spec.value.topology) &&
   !(Object.keys(spec.value.parasitic_config || {}).length && ['diode_cj_pf','qr_cds_pf'].includes(item.key))));
 const result = ref<Snapshot | null>(null),
@@ -71,6 +75,7 @@ const showSidebar = ref(false),
 const example = ref(""),
   projectTitle = ref("40W CCM 反激设计"),
   crossRegulation = ref(false);
+const sizingOpen = ref(false);
 const mosRealTime = ref(false),
   fontSize = ref(16),
   curveViewer = ref<CurveTarget | null>(null);
@@ -81,6 +86,7 @@ const windingPreview = ref<Spec | null>(null),
   windingImage = ref("");
 const fileInput = ref<HTMLInputElement>(),
   helpDocuments = ref<HTMLDetailsElement>(),
+  fileMenu = ref<HTMLDetailsElement>(),exampleMenu = ref<HTMLDetailsElement>(),automaticMenu = ref<HTMLDetailsElement>(),
   isolationDraft = ref<Spec | null>(null),
   revision = ref(0);
 let timer: ReturnType<typeof setTimeout> | undefined,
@@ -88,6 +94,9 @@ let timer: ReturnType<typeof setTimeout> | undefined,
   previewRevision = 0,
   previewFingerprint = '',
   disposed = false;
+let pendingWindingConfig:Spec|null=null;
+function closeProjectMenus(){for(const menu of [fileMenu.value,exampleMenu.value,automaticMenu.value])if(menu)menu.open=false;}
+async function chooseExample(key:string){example.value=key;closeProjectMenus();await selectExample();}
 watch([spec, preview, result, dirty, busy], notifyHost, {deep: true});
 const allNav = [
   { id: "overview", name: "设计总览", icon: "grid" },
@@ -142,6 +151,10 @@ const resultIsolated = computed(() =>
   ),
 );
 const multi = computed(() => Boolean(spec.value.outputs?.length));
+const inductorChoice = computed(() => !meta.value?.native && ['BUCK','BOOST','BUCK-BOOST'].includes(spec.value.topology));
+const purchasedInductor = computed(() => inductorChoice.value && spec.value.inductor_design_enabled === false);
+const magneticDesignFields = new Set(['Bmax','Bsat','J','Ku','rho','k_core','a_core','b_core','MLT','h_conv','temp_rise_limit']);
+const purchasedInductorFields = new Set(['inductor_dcr','inductor_rated_current','inductor_saturation_current','inductor_extra_loss']);
 const feedback = computed(() => Number(spec.value.feedback_output) || 1);
 const groups = computed(() => {
   const rows = meta.value?.parameters || [],
@@ -158,6 +171,7 @@ const groups = computed(() => {
       "options",
     ];
   const excluded = new Set([
+    'inductor_design_enabled',
     'input_capacitors','output_capacitors','Cin1','Rcin1','ESLin1','Cin2','Rcin2','ESLin2','cin2_enable',
     'C_out','Rc','ESL','C_out2','Rc2','ESL2','cout2_enable',
     "component_management",
@@ -186,6 +200,7 @@ const groups = computed(() => {
       "Ns",
       "d_wire_s",
       "n_strand_s",
+      "parallel_wires_s",
       "C_out",
       "Rc",
       "ESL",
@@ -204,6 +219,8 @@ const groups = computed(() => {
       category,
       title: meta.value?.sections[category] || "其它计算与评审参数",
       rows: rows.filter((row) => {
+        if (purchasedInductor.value && magneticDesignFields.has(row.name)) return false;
+        if (!purchasedInductor.value && purchasedInductorFields.has(row.name)) return false;
         if (
           row.category !== category ||
           !["number", "boolean"].includes(row.type) ||
@@ -253,7 +270,7 @@ const groups = computed(() => {
         );
       }),
     }))
-    .filter((group) => group.rows.length || group.category==='capacitors');
+    .filter((group) => group.rows.length || group.category==='capacitors' || (group.category==='mag' && inductorChoice.value));
 });
 const metadataFields = computed(() =>
   Object.fromEntries((meta.value?.parameters || []).map((p) => [p.name, p])),
@@ -278,6 +295,7 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 function touch() {
+  pendingWindingConfig=null;
   if (exportOperation.value) void post(`/operations/${exportOperation.value}/cancel`, {}).catch(() => {});
   if (windingImage.value) URL.revokeObjectURL(windingImage.value);
   windingImage.value = "";
@@ -300,6 +318,11 @@ function setValue(key: string, value: any) {
 function replaceSpec(value: Spec) {
   spec.value = value;
   touch();
+}
+function changeWindingSpec(value:Spec){
+  if(exportOperation.value)void post(`/operations/${exportOperation.value}/cancel`,{}).catch(()=>{});
+  spec.value=value;revision.value++;dirty.value=true;error.value='';
+  message.value='绕制配置已写入当前工程，电气结果沿用；导出报告前请重新计算以更新几何快照。';
 }
 function applyUpdates(updates: Spec) {
   replaceSpec({ ...clone(spec.value), ...clone(updates) });
@@ -335,13 +358,32 @@ async function openTutorial() {
     error.value = e.message;
   }
 }
+async function openSizingBasis() {
+  if (helpDocuments.value) helpDocuments.value.open = false;
+  const name = '自动计算参数依据.docx';
+  try {
+    if (meta.value?.native && integration.documentUrls?.sizingBasis) {
+      const link = document.createElement('a');
+      link.href = integration.documentUrls.sizingBasis; link.download = name; link.click();
+    } else {
+      download(await getBlob('/auto-design-basis'), name);
+    }
+  } catch (e: any) { error.value = e.message; }
+}
+async function adoptDraft(config: Spec) {
+  await loadConfig(config, (config.topology==='FLYBACK' ? '反激' : config.topology==='BOOST' ? 'Boost' : 'Buck')+' 自动设计初版');
+  example.value = '';
+  dirty.value = true;
+  sizingOpen.value = false;
+  await calculate();
+}
 function densityHint(key: string) {
   const tr = display.value?.magnetics?.find(
     (d: Spec) => d.kind === "transformer",
   );
   let j: number | undefined;
-  if (["d_wire_p", "n_strand_p"].includes(key)) j = tr?.J_actual_p;
-  if (["d_wire_s", "n_strand_s"].includes(key)) j = tr?.J_actual_s;
+  if (["d_wire_p", "n_strand_p", "parallel_wires_p"].includes(key)) j = tr?.J_actual_p;
+  if (["d_wire_s", "n_strand_s", "parallel_wires_s"].includes(key)) j = tr?.J_actual_s;
   return j === undefined
     ? ""
     : (dirty.value ? "上次计算 " : "") + "J = " + fmt(j / 1e6, "A/mm²");
@@ -375,7 +417,8 @@ function reuseCurve() {
   reuseCurveTarget.value = "";
 }
 async function evaluateWinding(config: Spec) {
-  if (!job.value || !result.value || busy.value || windingBusy.value) return;
+  if (!job.value || !result.value || busy.value) return;
+  if(windingBusy.value){pendingWindingConfig=clone(config);return;}
   const jobId = job.value.id;
   const generation = revision.value;
   const caseId = activeCase.value;
@@ -389,7 +432,7 @@ async function evaluateWinding(config: Spec) {
   try {
     const command = await post(`/jobs/${jobId}/action`, {
       action: "winding_preview",
-      options: { case: caseId, config },
+      options: { case: caseId, config, ...(meta.value?.native?{}:{render_chart:false}) },
     });
     for (let i = 0; i < 200; i++) {
       const op = await request<any>(`/operations/${command.id}`);
@@ -413,6 +456,8 @@ async function evaluateWinding(config: Spec) {
     if (current()) windingError.value = e.message;
   } finally {
     windingBusy.value = false;
+    const pending=pendingWindingConfig;pendingWindingConfig=null;
+    if(pending&&!disposed)void evaluateWinding(pending);
   }
 }
 watch(nav, (items) => {
@@ -444,7 +489,7 @@ function changeTopology(value: string) {
   } else if (isolationDraft.value) {
     Object.assign(spec.value, clone(isolationDraft.value));
   }
-  if (!["FLYBACK", "ACF-FORWARD"].includes(value)) {
+  if (!["FLYBACK", "ACF-FORWARD"].includes(value) && !(value === 'QR-FLYBACK' && !meta.value?.native)) {
     spec.value.feedback_mode = "SSR";
     if (spec.value.coupling_config) spec.value.coupling_config.enabled = false;
   }
@@ -620,8 +665,9 @@ async function refreshPreview() {
     if (current === previewRevision) previewError.value = e.message;
   }
 }
-async function loadConfig(raw: Spec, title?: string) {
+async function loadConfig(raw: Spec, title?: string, source:typeof geometrySource=null) {
   const value = await post<Spec>("/config", { spec: raw });
+  geometrySource=source;
   spec.value = value;
   result.value = null;
   touch();
@@ -634,8 +680,13 @@ async function selectExample() {
   if (!example.value) return;
   error.value = "";
   try {
-    const raw = await request<Spec>("/examples/" + example.value);
-    await loadConfig(raw, meta.value?.examples[example.value] || "电源设计");
+    const name=example.value,title=meta.value?.examples[name] || '电源设计';
+    if(meta.value?.native) await loadConfig(await request<Spec>('/examples/'+name),title);
+    else {
+      const data=await getBlob('/examples/'+encodeURIComponent(name)+'/source');
+      const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(await data.arrayBuffer());
+      await loadConfig(JSON.parse(text.replace(/^\uFEFF/,'')),title,{name,text});
+    }
   } catch (e: any) {
     error.value = e.message;
   }
@@ -645,10 +696,12 @@ async function importConfig(event: Event) {
   if (!file) return;
   try {
     if (file.size > 16 * 1024 * 1024) throw new Error("配置不可超过16 MiB");
-    const raw = JSON.parse(await file.text());
+    const sourceText=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(await file.arrayBuffer());
+    const raw = JSON.parse(sourceText.replace(/^\uFEFF/,''));
     await loadConfig(
       raw.schema === "power-design.snapshot.v1" ? raw.spec : raw,
       file.name.replace(/\.json$/i, ""),
+      raw.schema?null:{name:file.name,text:sourceText},
     );
     showSidebar.value = true;
   } catch (e: any) {
@@ -774,6 +827,7 @@ async function exportReport(format: string) {
     const operation = await post(`/jobs/${job.value.id}/export`, {
       format,
       mos_real_time: mosRealTime.value,
+      ...(format==='geometry' && geometrySource?{original_name:geometrySource.name,original_text:geometrySource.text}:{}),
     });
     exportOperation.value = operation.id;
     const cfg = spec.value.spice_config || {};
@@ -786,12 +840,12 @@ async function exportReport(format: string) {
       if (state.state === "succeeded") {
         if (generation !== revision.value)
           throw new Error("报告已生成，但参数已变化；请重新计算后导出当前设计");
-        const name = projectTitle.value + (format === 'comparison' ? '_仿真与设计计算对比报告' : format === 'zip' ? '_LTspice闭环' : "_Vinmin-Vinmax");
+        const name = projectTitle.value + (format === 'geometry' ? '_变压器三维建模' : format === 'comparison' ? '_仿真与设计计算对比报告' : format === 'zip' ? '_LTspice闭环' : "_Vinmin-Vinmax");
         download(
           await getBlob(
             `/files/${operation.id}?filename=${encodeURIComponent(name)}`,
           ),
-          name + "." + (format === 'comparison' ? 'zip' : format),
+          name + "." + (format === 'comparison' || format === 'geometry' ? 'zip' : format),
         );
         message.value =
           format === 'comparison' ? '已生成实际仿真对比报告 ZIP，内含 Word、工程与日志；请先查看报告中的完成状态。' : format === 'zip' ? 'LTspice 工程已导出；解压后打开 Flyback.asc 查看功率级与控制器连接。' : "已导出 " + format.toUpperCase() + " · 来自当前双工况快照";
@@ -800,6 +854,10 @@ async function exportReport(format: string) {
           message.value = `瞬态完成 ${summary.successful}/${summary.total}；有效 FRA ${summary.fra_successful}/${summary.fra_total}。`;
           if (!summary.successful) error.value = "所有工况均未完成；下载的是诊断报告，尚无有效对比数据。请查看日志和失败原因。";
           else if (summary.incomplete) message.value += " 存在未完成项目，请查看报告状态。";
+        }
+        if(format==='geometry'){
+          const g=state.result.geometry;
+          message.value=`已导出 ${g.sections} 段、${g.bundles} 个线束截面。`+(g.ready.geometry_3d?'名义三维路径已就绪。':'待补尺寸或接线见包内 missing_fields。');
         }
         return;
       }
@@ -916,6 +974,9 @@ onBeforeUnmount(() => {
             <button type="button" aria-label="多路反激电源设计入门教程" @click="openTutorial">
               <Icon name="book" /><span>多路反激电源设计入门教程<small>从原理到数值算例 · Word</small></span>
             </button>
+            <button v-if="!meta?.native || integration.documentUrls?.sizingBasis" type="button" @click="openSizingBasis">
+              <Icon name="file" /><span>自动计算参数依据<small>原厂资料、选值规则与角点算例 · Word</small></span>
+            </button>
           </div>
         </details>
         <button
@@ -923,20 +984,26 @@ onBeforeUnmount(() => {
           @click="showSidebar = !showSidebar"
         >
           <Icon name="settings" />参数</button
-        ><button
-          class="button"
-          aria-label="导入配置"
-          @click="fileInput?.click()"
         >
-          <Icon name="upload" /><span>导入配置</span></button
-        ><button
-          class="button"
-          aria-label="保存工程"
-          :disabled="!meta"
-          @click="saveConfig"
-        >
-          <Icon name="folder" /><span>保存工程</span></button
-        ><button
+        <details ref="fileMenu" class="help-documents" @keydown.esc="closeProjectMenus">
+          <summary class="button" aria-label="文件"><Icon name="folder" /><span>文件</span><Icon name="chevron" :size="14" /></summary>
+          <div class="help-document-menu">
+            <button type="button" aria-label="导入配置" @click="closeProjectMenus();fileInput?.click()"><Icon name="upload" /><span>导入配置</span></button>
+            <button type="button" aria-label="保存工程" :disabled="!meta" @click="closeProjectMenus();saveConfig()"><Icon name="download" /><span>保存工程</span></button>
+          </div>
+        </details>
+        <details ref="exampleMenu" class="help-documents" @keydown.esc="closeProjectMenus">
+          <summary class="button" aria-label="示例"><Icon name="grid" /><span>示例</span><Icon name="chevron" :size="14" /></summary>
+          <div class="help-document-menu"><button v-for="(label,key) in meta?.examples" type="button" :disabled="busy" @click="chooseExample(String(key))"><Icon name="file" /><span>{{ label }}</span></button></div>
+        </details>
+        <details v-if="meta && !meta.native" ref="automaticMenu" class="help-documents" @keydown.esc="closeProjectMenus">
+          <summary class="button" aria-label="自动设计"><Icon name="chip" /><span>自动设计</span><Icon name="chevron" :size="14" /></summary>
+          <div class="help-document-menu">
+            <button type="button" :disabled="busy" @click="closeProjectMenus();sizingOpen=true"><Icon name="play" /><span>按规格生成初版<small>Buck / Boost / 反激</small></span></button>
+            <button type="button" @click="closeProjectMenus();openSizingBasis()"><Icon name="book" /><span>自动计算参数依据</span></button>
+          </div>
+        </details>
+        <button
           class="button primary"
           :aria-label="busy ? '计算中' : '重新计算'"
           :disabled="busy || !meta"
@@ -981,14 +1048,7 @@ onBeforeUnmount(() => {
         </div>
         <template v-if="meta"
           ><div class="sidebar-intro">
-            <label class="stacked-label"
-              >示例方案<select v-model="example" @change="selectExample">
-                <option disabled value="">选择示例方案…</option>
-                <option v-for="(label, key) in meta.examples" :value="key">
-                  {{ label }}
-                </option>
-              </select></label
-            >
+            <p class="hint">文件、示例与自动设计已分列在顶部菜单。</p>
             <div class="search-field">
               <Icon name="search" :size="16" /><input
                 v-model="search"
@@ -1273,6 +1333,12 @@ onBeforeUnmount(() => {
                 ><Icon name="chevron" :size="14" />
               </summary>
               <div class="section-content">
+                <template v-if="group.category==='mag' && inductorChoice">
+                  <label class="field-row"><span>启用电感磁芯与绕组设计</span>
+                    <input type="checkbox" :checked="spec.inductor_design_enabled !== false"
+                      @change="setValue('inductor_design_enabled',($event.target as HTMLInputElement).checked)" /></label>
+                  <p class="card-note">取消＝外购成品电感。L 仍在功率级填写；按 DCR 计算直流铜损，0 表示未提供。磁芯/交流附加损耗未填时不计，磁密、绕制与温升未评估。</p>
+                </template>
                 <template v-if="group.category==='capacitors'">
                   <CapacitorBank :spec="spec" side="input" :value="spec.input_capacitors" @change="setValue('input_capacitors',$event)" />
                   <CapacitorBank v-if="!multi" :spec="spec" :value="spec.output_capacitors" @change="setValue('output_capacitors',$event)" />
@@ -1306,7 +1372,7 @@ onBeforeUnmount(() => {
                   <ParasiticEditor :spec="spec" :schema="meta!.parasitics" @change="setValue('parasitic_config',$event)" />
                 </details>
                 <template v-if="group.category === 'mag'">
-                  <CoreEditor :spec="spec" :meta="meta" @change="replaceSpec" />
+                  <CoreEditor v-if="!purchasedInductor" :spec="spec" :meta="meta" @change="replaceSpec" />
                   <CoreEditor
                     v-if="spec.topology === 'ACF-FORWARD' && !multi"
                     :spec="spec"
@@ -1370,7 +1436,7 @@ onBeforeUnmount(() => {
               </div>
             </details>
             <details
-              v-if="['FLYBACK','ACF-FORWARD'].includes(spec.topology) && spec.feedback_mode === 'SSR'"
+              v-if="(['FLYBACK','ACF-FORWARD'].includes(spec.topology) || (spec.topology === 'QR-FLYBACK' && !meta?.native)) && spec.feedback_mode === 'SSR'"
               class="parameter-section"
             >
               <summary>
@@ -1388,11 +1454,11 @@ onBeforeUnmount(() => {
                         ($event.target as HTMLInputElement).checked,
                       )
                     "
-                  />启用两两 kij 反激计算或正激仿真</label
+                  />启用两两 kij 物理周期计算</label
                 >
                 <p class="hint">
                   输入对称耦合系数，不是 RCD 的
-                  K。正激启用矩阵后，同时计算物理钳位、逐路输出电感和电荷平衡。改变路数会重置矩阵，请重新复核。
+                  K。QR 按退磁与离散谷底决定周期；正激另求钳位与各路电感。独立计算各路电荷平衡。改变路数会重置矩阵，请重新复核。
                 </p>
                 <div v-if="spec.coupling_config?.enabled" class="matrix-scroll">
                   <table class="matrix">
@@ -1455,7 +1521,7 @@ onBeforeUnmount(() => {
                   />计算交叉调整率 <span class="tag amber">较慢</span></label
                 >
                 <p class="hint">
-                  仅适用模型会执行。启用后扫描独立最小/最大负载组合，并纳入报告。
+                  启用后按同一硬件扫描各路实际最小/最大功耗，并纳入报告。QR 矩阵角点支持本地 Python 计算；纯浏览器内核暂未接入。
                 </p>
               </div>
             </details>
@@ -2034,6 +2100,7 @@ onBeforeUnmount(() => {
               >
               <template v-if="page === 'magnetics'"
                 ><ChartPanel
+                  v-if="!display?.magnetics?.some((d: Spec)=>d.design_enabled === false)"
                   :job="chartJob"
                   :case-id="activeCase"
                   kind="magnetic_flux"
@@ -2042,6 +2109,8 @@ onBeforeUnmount(() => {
                   :case-id="activeCase"
                   kind="magnetics"
                   title="磁件损耗与估算温升" />
+                <MagneticReport v-if="display?.magnetic_report" :report="display.magnetic_report" />
+                <template v-else>
                 <section v-for="device in display?.magnetics" class="card">
                   <div class="card-heading">
                     <h3>
@@ -2057,7 +2126,11 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="magnetic-facts">
                     <div
-                      v-for="(label, key) in {
+                      v-for="(label, key) in device.design_enabled === false ? {
+                        L: '电感量 / H', R_dc: '成品 DCR / Ω', I_rms: '实际 RMS 电流 / A', I_pk: '实际峰值电流 / A',
+                        inductor_rated_current: '厂家 RMS 额定值 / A（0=未提供）', inductor_saturation_current: '厂家 Isat / A（0=未提供）',
+                        P_cu: '直流铜损 / W', P_extra: '用户附加损耗 / W'
+                      } : {
                         B_pk: '峰值磁密 / T',
                         dB: '磁通摆幅 / T',
                         Np: '原边匝数',
@@ -2072,6 +2145,18 @@ onBeforeUnmount(() => {
                       ><strong>{{ fmt(device[key]) }}</strong>
                     </div>
                   </div>
+                    <div v-if="device.kind === 'transformer' && device.gap_design" class="magnetic-facts">
+                      <div><span>磁材相对磁导率 μr</span><strong>{{ fmt(device.gap_design.mu_r) }}</strong></div>
+                      <div><span>有效磁路长度 le / mm</span><strong>{{ fmt(device.gap_design.le_m * 1000) }}</strong></div>
+                      <div><span>目标 AL / nH/匝²</span><strong>{{ fmt(device.gap_design.AL_target_H * 1e9) }}</strong></div>
+                      <div><span>无气隙励磁电感 / µH</span><strong>{{ device.gap_design.L_ungapped_H === null ? '待提供 μr' : fmt(device.gap_design.L_ungapped_H * 1e6) }}</strong></div>
+                      <div><span>估算等效总气隙 lg / mm</span><strong>{{ device.gap_design.gap_m === null ? '待核对' : fmt(device.gap_design.gap_m * 1000) }}</strong></div>
+                      <div><span>目标电感对应的等效磁导率 μe</span><strong>{{ fmt(device.gap_design.mu_effective) }}</strong></div>
+                    </div>
+                    <p v-if="device.gap_design" class="card-note">
+                      {{ device.gap_design.mu_r_source }} · {{ device.gap_design.le_source }}。
+                      {{ device.gap_design.mu_r_conditions || '' }} {{ device.gap_design.note }}
+                    </p>
                   <div v-if="device.windings?.length" class="table-wrap">
                     <table class="data-table">
                       <thead>
@@ -2097,8 +2182,7 @@ onBeforeUnmount(() => {
                     </table>
                   </div>
                   <p class="card-note">
-                    变压器温升使用用户输入的 Ri-a。磁损 k、α、β
-                    保留原模型和单位约定。
+                    {{ device.design_enabled === false ? device.note : '变压器温升使用用户输入的 Ri-a。磁损 k、α、β 保留原模型和单位约定。' }}
                   </p>
                 </section>
                 <ResultTable
@@ -2109,6 +2193,7 @@ onBeforeUnmount(() => {
                     (device.kind === 'transformer' ? '变压器' : '输出电感') +
                     ' · 完整磁件设计依据'
                   " />
+                </template>
                 <WindingEditor
                   v-if="resultIsolated"
                   :spec="spec"
@@ -2119,9 +2204,14 @@ onBeforeUnmount(() => {
                   :automatic-plan="windingPreview?.automatic_plan"
                   :preview-busy="windingBusy"
                   :preview-error="windingError || windingPreview?.preview_error"
-                  @change="replaceSpec"
+                  @change="changeWindingSpec"
                   @preview="evaluateWinding" />
-                <section v-if="windingImage" class="card">
+                <TransformerGeometry v-if="resultIsolated && meta && !meta.native" :config="spec.winding_config||{}"
+                  :assessment="windingPreview?.assessment || display?.winding_assessment"
+                  :can-export="!!job && !dirty && !busy" :exporting="!!exporting"
+                  @apply="(value)=>setValue('winding_config',{...spec.winding_config,model_3d:value})"
+                  @download="exportReport('geometry')" />
+                <section v-if="windingImage && !(windingPreview?.assessment || display?.winding_assessment)?.editable" class="card">
                   <div class="card-heading">
                     <h3>局部几何预览 · 基于当前已算绕组</h3>
                   </div>
@@ -2135,7 +2225,7 @@ onBeforeUnmount(() => {
                   </p>
                 </section>
                 <ChartPanel
-                  v-if="resultIsolated"
+                  v-if="resultIsolated && !(windingPreview?.assessment || display?.winding_assessment)?.editable"
                   :job="chartJob"
                   :case-id="activeCase"
                   kind="winding"
@@ -2303,6 +2393,19 @@ onBeforeUnmount(() => {
                   </div>
                 </section></template
               >
+              <section v-if="page === 'review' && result.cross_regulation?.cases?.length" class="card">
+                <h3>负载角点明细</h3>
+                <div class="table-wrap"><table class="data-table">
+                  <thead><tr><th>角点 / Vin</th><th>各路负载 / W</th><th>各路直流电压 / V</th><th>实际频率</th><th>状态</th></tr></thead>
+                  <tbody><tr v-for="corner in result.cross_regulation.cases" :key="corner.id">
+                    <td>{{ corner.id }} / {{ fmt(corner.V_in, 'V') }}</td>
+                    <td>{{ corner.powers?.join(' / ') }}</td>
+                    <td>{{ corner.voltages?.map((v:number) => fmt(v, 'V')).join(' / ') || '未求解' }}</td>
+                    <td>{{ fmt(corner.f_sw, 'Hz') }}</td>
+                    <td>{{ corner.error || (corner.qr_timing?.design_frequency_limit_exceeded ? '已求解；频率超设计上限' : corner.status === 'ok' ? '已求解' : '未计算 / 失败') }}</td>
+                  </tr></tbody>
+                </table></div>
+              </section>
               <template v-if="page === 'reports'"
                 ><section class="report-hero card">
                   <div>
@@ -2319,7 +2422,7 @@ onBeforeUnmount(() => {
                   <Icon name="file" :size="70" />
                 </section>
                 <section class="card spice-card" v-if="['FLYBACK','QR-FLYBACK','ACF-FORWARD','BUCK','BOOST'].includes(spec.topology) && spec.feedback_mode === 'SSR'">
-                  <div class="card-heading"><h3>LTspice 通用电源闭环设置</h3><span class="tag">{{ ['BUCK','BOOST'].includes(spec.topology)?(spec.control_mode==='Voltage Mode'?'TPS40200 · 电压模式':spec.topology==='BUCK'?'LTC3864 · 峰值电流':'LM5022 · 峰值电流'):spec.topology==='QR-FLYBACK'?'L6565 QR · 单路 SSR':spec.topology==='ACF-FORWARD'?'MP6005 · 有源钳位正激':'固定频率 · SSR' }}</span></div>
+                  <div class="card-heading"><h3>LTspice 通用电源闭环设置</h3><span class="tag">{{ ['BUCK','BOOST'].includes(spec.topology)?(spec.control_mode==='Voltage Mode'?'TPS40200 · 电压模式':spec.topology==='BUCK'?'LTC3864 · 峰值电流':'LM5022 · 峰值电流'):spec.topology==='QR-FLYBACK'?'L6565 QR · SSR':spec.topology==='ACF-FORWARD'?'MP6005 · 有源钳位正激':'固定频率 · SSR' }}</span></div>
                   <p>{{ spec.topology==='QR-FLYBACK'?'ZCD 事件触发决定实际周期，主界面 f_sw 为设计频率上限。外部参考缓升与理想 VCC 是模型假设；异常 CS 锁存至 VCC 欠压。':'用户可独立配置频率、软启动和保护。参考配置不是完整芯片模型。' }} 修改后重新计算再导出。</p>
                   <div class="report-actions">
                     <button class="button" :disabled="!!exporting" @click="spicePreset(spec.topology==='BOOST'?'lm5022':spec.topology==='BUCK'?(spec.control_mode==='Voltage Mode'?'tps40200':'ltc3864'):spec.topology==='QR-FLYBACK'?'l6565':spec.topology==='ACF-FORWARD'?'mp6005_acf':'mp6005')">{{ spec.topology==='BOOST'?'填入 LM5022 参考配置':spec.topology==='BUCK'?(spec.control_mode==='Voltage Mode'?'填入 TPS40200 参考配置':'填入 LTC3864 参考配置'):spec.topology==='QR-FLYBACK'?'填入 L6565 QR 参考配置':'填入 MP6005 SSR 参考配置' }}</button>
@@ -2344,7 +2447,7 @@ onBeforeUnmount(() => {
                     </div>
                   </section>
                   </div><ControllerLogic v-if="meta?.spice_logic" :definition="['BUCK','BOOST'].includes(spec.topology)?meta.spice_niso_logic:spec.topology==='QR-FLYBACK'?meta.spice_qr_logic:spec.topology==='ACF-FORWARD'?meta.spice_acf_logic:meta.spice_logic" :values="{...meta.spice_presets.generic,...(spec.spice_config || {})}" :design="spec" :selected="spiceFocus" @selected="spiceFocus=$event" /></div>
-                  <p>模型边界：Ron / 常数 Coss / 等效门电容，固定二极管压降，线性磁芯及理想隔离反馈。{{ ['BUCK','BOOST'].includes(spec.topology)?'默认快速闭环关闭结电容尖峰；单路无交叉调整率。Boost 关断 MOS 不会切断输入至输出的短路通路。':spec.topology==='QR-FLYBACK'?'QR 仅支持单路 SSR，当前计算小信号模型为工程近似，应与实际 FRA 分开判读。':'不是 MP6005 精确模型；FRA 和交叉负载角点由试验设置决定。' }}</p>
+                  <p>模型边界：Ron / 常数 Coss / 等效门电容，固定二极管压降，线性磁芯及理想隔离反馈。{{ ['BUCK','BOOST'].includes(spec.topology)?'默认快速闭环关闭结电容尖峰；单路无交叉调整率。Boost 关断 MOS 不会切断输入至输出的短路通路。':spec.topology==='QR-FLYBACK'?'Python 本地计算支持 QR 多路 SSR 矩阵跨调；小信号环路仍为低频约化，应与实际 FRA 分开判读。纯浏览器内核尚未支持 QR 矩阵跨调。':'不是 MP6005 精确模型；FRA 和交叉负载角点由试验设置决定。' }}</p>
                 </section>
                 <p v-if="exporting"><span class="spinner" /> {{ exportProgress }} · 已用时 {{ exportElapsed }} s。仿真可能需要较长时间。<button class="button" @click="cancelExport">取消本次导出与仿真</button></p>
                 <div class="report-actions">
@@ -2478,7 +2581,9 @@ onBeforeUnmount(() => {
       </main>
     </div>
     <Teleport :to="integration.portal || 'body'"
-      ><CurveImporter
+      ><InitialDesign v-if="sizingOpen" :current="spec" :apply="adoptDraft"
+          @close="sizingOpen = false" @basis="openSizingBasis" />
+      <CurveImporter
         v-if="curveTarget"
         :target="curveTarget"
         :spec="spec"
